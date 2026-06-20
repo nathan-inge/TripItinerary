@@ -1,10 +1,13 @@
-import type { Item, ItemType, Traveler } from '../api/types';
+import { useState } from 'react';
+import type { CreateItem, Item, ItemType, Traveler } from '../api/types';
 import ItemLinks from './ItemLinks';
+import AddItemForm from './AddItemForm';
 
 interface Props {
   item: Item;
   travelers: Traveler[];
   onDelete: () => void;
+  onUpdate?: (body: CreateItem) => void | Promise<void>;
   readOnly?: boolean;
 }
 
@@ -31,14 +34,63 @@ function formatTime(iso: string | null): string {
   return `${m[4]}:${m[5]}`;
 }
 
-export default function ItemCard({ item, travelers, onDelete, readOnly }: Props) {
+export default function ItemCard({
+  item,
+  travelers,
+  onDelete,
+  onUpdate,
+  readOnly,
+}: Props) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing && onUpdate) {
+    return (
+      <AddItemForm
+        travelers={travelers}
+        initial={{
+          type: item.type,
+          title: item.title,
+          start_at: item.start_at,
+          end_at: item.end_at,
+          location: item.location,
+          confirmation_no: item.confirmation_no,
+          notes: item.notes,
+          details: item.details,
+          links: item.links,
+          traveler_ids: item.traveler_ids,
+        }}
+        onCancel={() => setEditing(false)}
+        onSubmit={async (body) => {
+          await onUpdate(body);
+          setEditing(false);
+        }}
+      />
+    );
+  }
+
   const travelerNames = item.traveler_ids
     .map((tid) => travelers.find((t) => t.id === tid)?.name)
     .filter(Boolean) as string[];
 
+  const canEdit = !readOnly && !!onUpdate;
+  const openEdit = () => {
+    if (canEdit) setEditing(true);
+  };
+
   return (
     <article
-      className={`rounded-xl border bg-white p-3 shadow-sm ${TYPE_COLOR[item.type]}`}
+      className={`rounded-xl border bg-white p-3 shadow-sm ${TYPE_COLOR[item.type]} ${
+        canEdit ? 'cursor-pointer hover:shadow-md' : ''
+      }`}
+      role={canEdit ? 'button' : undefined}
+      tabIndex={canEdit ? 0 : undefined}
+      onClick={openEdit}
+      onKeyDown={(e) => {
+        if (canEdit && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          openEdit();
+        }
+      }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -60,7 +112,9 @@ export default function ItemCard({ item, travelers, onDelete, readOnly }: Props)
               {travelerNames.join(', ')}
             </p>
           )}
-          <ItemLinks links={item.links} confirmationNo={item.confirmation_no} />
+          <div onClick={(e) => e.stopPropagation()}>
+            <ItemLinks links={item.links} confirmationNo={item.confirmation_no} />
+          </div>
           {item.notes && (
             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
               {item.notes}
@@ -69,7 +123,10 @@ export default function ItemCard({ item, travelers, onDelete, readOnly }: Props)
         </div>
         {!readOnly && (
           <button
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             className="text-xs text-slate-400 hover:text-red-700"
             aria-label="Delete item"
             title="Delete"

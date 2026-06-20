@@ -47,6 +47,12 @@ export default function SharedTrip() {
     load();
   };
 
+  const handleUpdateItem = async (item: Item, body: CreateItem) => {
+    if (!client) return;
+    await client.updateItem(item.id, body);
+    load();
+  };
+
   const handleSaveDayNote = async (date: string, notes_md: string) => {
     if (!client) return;
     await client.upsertDayNote(date, notes_md);
@@ -136,6 +142,7 @@ export default function SharedTrip() {
         dayNotes={data.day_notes}
         onSaveDayNote={handleSaveDayNote}
         onDeleteItem={handleDeleteItem}
+        onUpdateItem={canEdit ? handleUpdateItem : undefined}
         readOnly={!canEdit}
       />
     </div>

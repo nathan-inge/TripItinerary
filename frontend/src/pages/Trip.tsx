@@ -41,6 +41,11 @@ export default function TripPage() {
     load();
   };
 
+  const handleUpdateItem = async (item: Item, body: CreateItem) => {
+    await api.updateItem(item.id, body);
+    load();
+  };
+
   const handleSaveDayNote = async (date: string, notes_md: string) => {
     if (!id) return;
     await api.upsertDayNote(id, date, notes_md);
@@ -129,6 +134,7 @@ export default function TripPage() {
         dayNotes={data.day_notes}
         onSaveDayNote={handleSaveDayNote}
         onDeleteItem={handleDeleteItem}
+        onUpdateItem={handleUpdateItem}
       />
     </div>
   );
