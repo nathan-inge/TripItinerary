@@ -127,3 +127,31 @@ pub struct UpdateItem {
     pub traveler_ids: Option<Vec<String>>,
     pub parse_status: Option<ParseStatus>,
 }
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ParseTextRequest {
+    pub raw_text: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ItemPreview {
+    #[serde(rename = "type")]
+    pub item_type: ItemType,
+    pub title: String,
+    pub start_at: String,
+    pub end_at: Option<String>,
+    pub location: Option<String>,
+    pub confirmation_no: Option<String>,
+    pub notes: String,
+    pub details: serde_json::Value,
+    pub links: Vec<Link>,
+    pub raw_source: String,
+    pub source: ItemSource,
+    pub parse_status: ParseStatus,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ParseTextResponse {
+    pub preview: ItemPreview,
+    pub review_reason: String,
+}

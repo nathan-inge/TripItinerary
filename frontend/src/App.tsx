@@ -2,6 +2,7 @@ import { Link, Route, Routes } from 'react-router-dom';
 import TripList from './pages/TripList';
 import Trip from './pages/Trip';
 import TripManage from './pages/TripManage';
+import SharedTrip from './pages/SharedTrip';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/" element={<TripList />} />
           <Route path="/trips/:id" element={<Trip />} />
           <Route path="/trips/:id/manage" element={<TripManage />} />
+          <Route path="/share/:token" element={<SharedTrip />} />
         </Routes>
       </main>
     </div>

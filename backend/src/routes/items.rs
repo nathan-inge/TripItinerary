@@ -10,20 +10,83 @@ use uuid::Uuid;
 use crate::auth::OwnerIdentity;
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    CreateItem, Item, ItemSource, ItemType, Link, ParseStatus, UpdateItem,
+    CreateItem, Item, ItemPreview, ItemSource, ItemType, Link, ParseStatus,
+    ParseTextRequest, ParseTextResponse, UpdateItem,
 };
+use crate::parse::claude::estimate_tokens;
 use crate::routes::trips::require_trip_access;
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/trips/:trip_id/items", post(create_item))
+        .route("/trips/:trip_id/items/parse", post(parse_text))
         .route(
             "/items/:id",
             axum::routing::get(get_item)
                 .patch(update_item)
                 .delete(delete_item),
         )
+}
+
+pub async fn parse_text(
+    State(state): State<AppState>,
+    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    Path(trip_id): Path<String>,
+    Json(payload): Json<ParseTextRequest>,
+) -> AppResult<Json<ParseTextResponse>> {
+    require_trip_access(&state, &trip_id, &owner.email).await?;
+
+    let raw_text = payload.raw_text.trim();
+    if raw_text.is_empty() {
+        return Err(AppError::BadRequest("raw_text required".into()));
+    }
+    if raw_text.len() > 50_000 {
+        return Err(AppError::BadRequest(
+            "raw_text exceeds 50 KB limit".into(),
+        ));
+    }
+
+    let claude = state
+        .claude
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("ANTHROPIC_API_KEY not configured on server".into()))?;
+
+    let est = estimate_tokens(raw_text);
+    state
+        .token_cap
+        .check_and_reserve(est, state.cfg.daily_token_cap)
+        .await
+        .map_err(AppError::BadRequest)?;
+
+    let (parsed, actual) = match claude.parse_item(raw_text).await {
+        Ok(v) => v,
+        Err(e) => {
+            state.token_cap.settle(est, 0).await;
+            return Err(AppError::Internal(e));
+        }
+    };
+    state.token_cap.settle(est, actual).await;
+
+    let preview = ItemPreview {
+        item_type: parsed.item_type,
+        title: parsed.title,
+        start_at: parsed.start_at,
+        end_at: parsed.end_at,
+        location: parsed.location,
+        confirmation_no: parsed.confirmation_no,
+        notes: parsed.notes,
+        details: parsed.details,
+        links: parsed.links,
+        raw_source: raw_text.to_string(),
+        source: parsed.source,
+        parse_status: parsed.parse_status,
+    };
+
+    Ok(Json(ParseTextResponse {
+        preview,
+        review_reason: parsed.review_reason,
+    }))
 }
 
 #[derive(sqlx::FromRow)]
@@ -318,4 +381,106 @@ async fn fetch_item_row(state: &AppState, id: &str, owner_email: &str) -> AppRes
     .fetch_optional(&state.pool)
     .await?;
     row.ok_or_else(|| AppError::NotFound(format!("item {} not found", id)))
+}
+
+pub async fn fetch_item_unscoped(pool: &SqlitePool, id: &str) -> AppResult<Item> {
+    let row: ItemRow = sqlx::query_as("SELECT * FROM items WHERE id = ?1")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+    hydrate(pool, row).await
+}
+
+/// Update an item scoped to a trip (no owner check). Used by share-token routes.
+pub async fn update_for_trip(
+    pool: &SqlitePool,
+    trip_id: &str,
+    item_id: &str,
+    payload: UpdateItem,
+) -> AppResult<Item> {
+    let mut row: ItemRow =
+        sqlx::query_as("SELECT * FROM items WHERE id = ?1 AND trip_id = ?2")
+            .bind(item_id)
+            .bind(trip_id)
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("item {} not found", item_id)))?;
+
+    if let Some(t) = payload.item_type {
+        row.type_ = t.as_str().to_string();
+    }
+    if let Some(t) = payload.title {
+        if t.trim().is_empty() {
+            return Err(AppError::BadRequest("title cannot be empty".into()));
+        }
+        row.title = t;
+    }
+    if let Some(s) = payload.start_at {
+        row.start_at = s;
+    }
+    if let Some(e) = payload.end_at {
+        row.end_at = e;
+    }
+    if let Some(l) = payload.location {
+        row.location = l;
+    }
+    if let Some(c) = payload.confirmation_no {
+        row.confirmation_no = c;
+    }
+    if let Some(n) = payload.notes {
+        row.notes = n;
+    }
+    if let Some(d) = payload.details {
+        row.details_json =
+            serde_json::to_string(&d).map_err(|e| AppError::Internal(e.into()))?;
+    }
+    if let Some(links) = payload.links {
+        row.links_json =
+            serde_json::to_string(&links).map_err(|e| AppError::Internal(e.into()))?;
+    }
+    if let Some(ps) = payload.parse_status {
+        row.parse_status = ps.as_str().to_string();
+    }
+    row.updated_at = Utc::now().to_rfc3339();
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE items SET type=?1, title=?2, start_at=?3, end_at=?4, location=?5,
+            confirmation_no=?6, notes=?7, details_json=?8, links_json=?9,
+            parse_status=?10, updated_at=?11
+         WHERE id=?12",
+    )
+    .bind(&row.type_)
+    .bind(&row.title)
+    .bind(&row.start_at)
+    .bind(&row.end_at)
+    .bind(&row.location)
+    .bind(&row.confirmation_no)
+    .bind(&row.notes)
+    .bind(&row.details_json)
+    .bind(&row.links_json)
+    .bind(&row.parse_status)
+    .bind(&row.updated_at)
+    .bind(&row.id)
+    .execute(&mut *tx)
+    .await?;
+
+    if let Some(tids) = payload.traveler_ids {
+        sqlx::query("DELETE FROM item_travelers WHERE item_id=?1")
+            .bind(&row.id)
+            .execute(&mut *tx)
+            .await?;
+        for tid in &tids {
+            sqlx::query(
+                "INSERT INTO item_travelers (item_id, traveler_id) VALUES (?1, ?2)",
+            )
+            .bind(&row.id)
+            .bind(tid)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+
+    hydrate(pool, row).await
 }

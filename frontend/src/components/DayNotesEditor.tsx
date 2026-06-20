@@ -3,15 +3,29 @@ import { useEffect, useState } from 'react';
 interface Props {
   initialValue: string;
   onSave: (notes_md: string) => void | Promise<void>;
+  readOnly?: boolean;
 }
 
-export default function DayNotesEditor({ initialValue, onSave }: Props) {
+export default function DayNotesEditor({
+  initialValue,
+  onSave,
+  readOnly,
+}: Props) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(initialValue);
 
   useEffect(() => {
     setValue(initialValue);
   }, [initialValue]);
+
+  if (readOnly) {
+    if (!initialValue) return null;
+    return (
+      <div className="whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+        {initialValue}
+      </div>
+    );
+  }
 
   if (editing) {
     return (

@@ -4,12 +4,15 @@ import { api } from '../api/client';
 import type { CreateItem, Item, TripDetail } from '../api/types';
 import Timeline from '../components/Timeline';
 import AddItemForm from '../components/AddItemForm';
+import PasteParseForm from '../components/PasteParseForm';
+
+type AddMode = 'closed' | 'manual' | 'paste';
 
 export default function TripPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<TripDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>('closed');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -28,7 +31,7 @@ export default function TripPage() {
   const handleAdd = async (body: CreateItem) => {
     if (!id) return;
     await api.createItem(id, body);
-    setAdding(false);
+    setAddMode('closed');
     load();
   };
 
@@ -73,19 +76,49 @@ export default function TripPage() {
         </Link>
       </div>
 
-      <div>
+      <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => setAdding((v) => !v)}
-          className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
+          onClick={() =>
+            setAddMode((m) => (m === 'paste' ? 'closed' : 'paste'))
+          }
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${
+            addMode === 'paste'
+              ? 'bg-slate-200 text-slate-700'
+              : 'bg-teal-600 text-white hover:bg-teal-700'
+          }`}
         >
-          {adding ? 'Cancel' : '+ Add item'}
+          {addMode === 'paste' ? 'Cancel' : '📋 Paste confirmation'}
+        </button>
+        <button
+          onClick={() =>
+            setAddMode((m) => (m === 'manual' ? 'closed' : 'manual'))
+          }
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${
+            addMode === 'manual'
+              ? 'bg-slate-200 text-slate-700'
+              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+          }`}
+        >
+          {addMode === 'manual' ? 'Cancel' : '+ Add manually'}
         </button>
       </div>
 
-      {adding && (
+      {addMode === 'paste' && id && (
+        <PasteParseForm
+          tripId={id}
+          travelers={data.travelers}
+          onCancel={() => setAddMode('closed')}
+          onSaved={async () => {
+            setAddMode('closed');
+            await load();
+          }}
+        />
+      )}
+
+      {addMode === 'manual' && (
         <AddItemForm
           travelers={data.travelers}
-          onCancel={() => setAdding(false)}
+          onCancel={() => setAddMode('closed')}
           onSubmit={handleAdd}
         />
       )}

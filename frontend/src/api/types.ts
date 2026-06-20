@@ -79,3 +79,49 @@ export interface CreateItem {
   links?: Link[];
   traveler_ids?: string[];
 }
+
+export interface ItemPreview {
+  type: ItemType;
+  title: string;
+  start_at: string;
+  end_at: string | null;
+  location: string | null;
+  confirmation_no: string | null;
+  notes: string;
+  details: Record<string, unknown>;
+  links: Link[];
+  raw_source: string;
+  source: ItemSource;
+  parse_status: ParseStatus;
+}
+
+export interface ParseTextResponse {
+  preview: ItemPreview;
+  review_reason: string;
+}
+
+export type ShareScope = 'view' | 'edit';
+
+export interface ShareLink {
+  id: string;
+  trip_id: string;
+  label: string | null;
+  scope: ShareScope;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CreatedShareLink extends ShareLink {
+  token: string;
+  url_path: string;
+}
+
+export interface CreateShareLink {
+  label?: string | null;
+  scope: ShareScope;
+}
+
+export interface SharedTripDetail extends TripDetail {
+  share_scope: ShareScope;
+}

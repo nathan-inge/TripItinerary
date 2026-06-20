@@ -9,6 +9,7 @@ interface Props {
   dayNotes: DayNote[];
   onSaveDayNote: (date: string, notes_md: string) => void | Promise<void>;
   onDeleteItem: (item: Item) => void | Promise<void>;
+  readOnly?: boolean;
 }
 
 function isoDate(iso: string): string {
@@ -41,6 +42,7 @@ export default function Timeline({
   dayNotes,
   onSaveDayNote,
   onDeleteItem,
+  readOnly,
 }: Props) {
   const days = eachDate(trip.start_date, trip.end_date);
   const travelers: Traveler[] = trip.travelers;
@@ -85,6 +87,7 @@ export default function Timeline({
             <DayNotesEditor
               initialValue={noteFor(date)}
               onSave={(v) => onSaveDayNote(date, v)}
+              readOnly={readOnly}
             />
 
             {lodgings.map(({ item, startDate }) => (
@@ -120,6 +123,7 @@ export default function Timeline({
                 item={item}
                 travelers={travelers}
                 onDelete={() => onDeleteItem(item)}
+                readOnly={readOnly}
               />
             ))}
 

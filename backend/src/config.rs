@@ -9,6 +9,9 @@ pub struct Config {
     pub cf_access_team_domain: Option<String>,
     pub cf_access_aud: Option<String>,
     pub dev_bypass_auth: bool,
+    pub anthropic_api_key: Option<String>,
+    pub parse_model: String,
+    pub daily_token_cap: u64,
 }
 
 impl Config {
@@ -23,11 +26,23 @@ impl Config {
         let dev_bypass_auth = std::env::var("DEV_BYPASS_AUTH")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        let parse_model = std::env::var("TRIPIT_PARSE_MODEL")
+            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        let daily_token_cap = std::env::var("TRIPIT_DAILY_TOKEN_CAP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200_000);
 
         if !dev_bypass_auth && (cf_access_team_domain.is_none() || cf_access_aud.is_none()) {
             tracing::warn!(
                 "CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are unset; \
                  set DEV_BYPASS_AUTH=1 for local development, or configure them in production."
+            );
+        }
+        if anthropic_api_key.is_none() {
+            tracing::warn!(
+                "ANTHROPIC_API_KEY is unset — paste-text parsing will fail until it is set."
             );
         }
 
@@ -38,6 +53,9 @@ impl Config {
             cf_access_team_domain,
             cf_access_aud,
             dev_bypass_auth,
+            anthropic_api_key,
+            parse_model,
+            daily_token_cap,
         })
     }
 }

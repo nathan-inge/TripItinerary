@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod error;
 mod models;
+mod parse;
 mod routes;
 mod static_assets;
 
@@ -19,6 +20,8 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub cfg: Arc<config::Config>,
     pub jwks_client: auth::cf_access::JwksClient,
+    pub claude: Option<parse::ClaudeClient>,
+    pub token_cap: parse::TokenCap,
 }
 
 #[tokio::main]
@@ -34,10 +37,17 @@ async fn main() -> Result<()> {
     let pool = db::create_pool(&cfg.database_url).await?;
     db::run_migrations(&pool).await?;
 
+    let claude = cfg
+        .anthropic_api_key
+        .clone()
+        .map(|key| parse::ClaudeClient::new(key, cfg.parse_model.clone()));
+
     let state = AppState {
         pool: pool.clone(),
         cfg: Arc::new(cfg.clone()),
         jwks_client: auth::cf_access::JwksClient::default(),
+        claude,
+        token_cap: parse::TokenCap::default(),
     };
 
     let api = routes::api_router(state.clone());

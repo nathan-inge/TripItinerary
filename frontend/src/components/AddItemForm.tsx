@@ -5,6 +5,8 @@ interface Props {
   travelers: Traveler[];
   onCancel: () => void;
   onSubmit: (body: CreateItem) => void | Promise<void>;
+  initial?: Partial<CreateItem>;
+  reviewWarning?: string;
 }
 
 const TYPES: ItemType[] = ['flight', 'lodging', 'transport', 'activity'];
@@ -16,11 +18,24 @@ const TYPE_LABEL: Record<ItemType, string> = {
   activity: 'Activity 🎫',
 };
 
-export default function AddItemForm({ travelers, onCancel, onSubmit }: Props) {
-  const [type, setType] = useState<ItemType>('flight');
-  const [links, setLinks] = useState<Link[]>([]);
+// datetime-local accepts "YYYY-MM-DDTHH:MM"; trim seconds/offset from ISO inputs.
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(iso);
+  return m ? `${m[1]}T${m[2]}` : '';
+}
+
+export default function AddItemForm({
+  travelers,
+  onCancel,
+  onSubmit,
+  initial,
+  reviewWarning,
+}: Props) {
+  const [type, setType] = useState<ItemType>(initial?.type ?? 'flight');
+  const [links, setLinks] = useState<Link[]>(initial?.links ?? []);
   const [selectedTravelers, setSelectedTravelers] = useState<Set<string>>(
-    new Set(),
+    new Set(initial?.traveler_ids ?? []),
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +77,7 @@ export default function AddItemForm({ travelers, onCancel, onSubmit }: Props) {
       location,
       confirmation_no,
       notes,
-      details: {},
+      details: initial?.details ?? {},
       links: filteredLinks,
       traveler_ids: Array.from(selectedTravelers),
     };
@@ -81,6 +96,12 @@ export default function AddItemForm({ travelers, onCancel, onSubmit }: Props) {
       onSubmit={submit}
       className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
     >
+      {reviewWarning && (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span className="font-medium">Needs review:</span> {reviewWarning}
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {TYPES.map((t) => (
           <button
@@ -100,32 +121,54 @@ export default function AddItemForm({ travelers, onCancel, onSubmit }: Props) {
 
       <label className="block">
         <span className="text-sm font-medium text-slate-700">Title</span>
-        <input name="title" required placeholder="JL043 SFO → HND" />
+        <input
+          name="title"
+          required
+          placeholder="JL043 SFO → HND"
+          defaultValue={initial?.title ?? ''}
+        />
       </label>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Start</span>
-          <input name="start_at" type="datetime-local" required />
+          <input
+            name="start_at"
+            type="datetime-local"
+            required
+            defaultValue={toLocalInput(initial?.start_at)}
+          />
         </label>
         <label className="block">
           <span className="text-sm font-medium text-slate-700">
             End <span className="text-slate-400">(optional)</span>
           </span>
-          <input name="end_at" type="datetime-local" />
+          <input
+            name="end_at"
+            type="datetime-local"
+            defaultValue={toLocalInput(initial?.end_at)}
+          />
         </label>
       </div>
 
       <label className="block">
         <span className="text-sm font-medium text-slate-700">Location</span>
-        <input name="location" placeholder="SFO Terminal I" />
+        <input
+          name="location"
+          placeholder="SFO Terminal I"
+          defaultValue={initial?.location ?? ''}
+        />
       </label>
 
       <label className="block">
         <span className="text-sm font-medium text-slate-700">
           Confirmation #
         </span>
-        <input name="confirmation_no" placeholder="ABC123" />
+        <input
+          name="confirmation_no"
+          placeholder="ABC123"
+          defaultValue={initial?.confirmation_no ?? ''}
+        />
       </label>
 
       <fieldset className="space-y-1">
@@ -188,7 +231,7 @@ export default function AddItemForm({ travelers, onCancel, onSubmit }: Props) {
 
       <label className="block">
         <span className="text-sm font-medium text-slate-700">Notes</span>
-        <textarea name="notes" rows={2} />
+        <textarea name="notes" rows={2} defaultValue={initial?.notes ?? ''} />
       </label>
 
       {error && (

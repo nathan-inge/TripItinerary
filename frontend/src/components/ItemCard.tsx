@@ -5,6 +5,7 @@ interface Props {
   item: Item;
   travelers: Traveler[];
   onDelete: () => void;
+  readOnly?: boolean;
 }
 
 const TYPE_LABEL: Record<ItemType, string> = {
@@ -30,7 +31,7 @@ function formatTime(iso: string | null): string {
   return `${m[4]}:${m[5]}`;
 }
 
-export default function ItemCard({ item, travelers, onDelete }: Props) {
+export default function ItemCard({ item, travelers, onDelete, readOnly }: Props) {
   const travelerNames = item.traveler_ids
     .map((tid) => travelers.find((t) => t.id === tid)?.name)
     .filter(Boolean) as string[];
@@ -66,14 +67,16 @@ export default function ItemCard({ item, travelers, onDelete }: Props) {
             </p>
           )}
         </div>
-        <button
-          onClick={onDelete}
-          className="text-xs text-slate-400 hover:text-red-700"
-          aria-label="Delete item"
-          title="Delete"
-        >
-          ✕
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onDelete}
+            className="text-xs text-slate-400 hover:text-red-700"
+            aria-label="Delete item"
+            title="Delete"
+          >
+            ✕
+          </button>
+        )}
       </div>
     </article>
   );

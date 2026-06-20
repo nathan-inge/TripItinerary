@@ -1,8 +1,13 @@
 import type {
   CreateItem,
+  CreateShareLink,
   CreateTrip,
+  CreatedShareLink,
   DayNote,
   Item,
+  ParseTextResponse,
+  ShareLink,
+  SharedTripDetail,
   Traveler,
   Trip,
   TripDetail,
@@ -48,6 +53,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  parseText: (tripId: string, raw_text: string) =>
+    req<ParseTextResponse>(`/trips/${tripId}/items/parse`, {
+      method: 'POST',
+      body: JSON.stringify({ raw_text }),
+    }),
   updateItem: (id: string, body: Partial<CreateItem>) =>
     req<Item>(`/items/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteItem: (id: string) =>
@@ -58,4 +68,44 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ notes_md }),
     }),
+
+  listShareLinks: (tripId: string) =>
+    req<ShareLink[]>(`/trips/${tripId}/share`),
+  createShareLink: (tripId: string, body: CreateShareLink) =>
+    req<CreatedShareLink>(`/trips/${tripId}/share`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  revokeShareLink: (id: string) =>
+    req<void>(`/share/${id}`, { method: 'DELETE' }, false),
 };
+
+// Returns a token-scoped API for the guest /share/:token page.
+export function shareApi(token: string) {
+  const base = `/share/${encodeURIComponent(token)}`;
+  return {
+    getTrip: () => req<SharedTripDetail>(`${base}/trip`),
+    createItem: (body: CreateItem) =>
+      req<Item>(`${base}/items`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateItem: (id: string, body: Partial<CreateItem>) =>
+      req<Item>(`${base}/items/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    deleteItem: (id: string) =>
+      req<void>(`${base}/items/${id}`, { method: 'DELETE' }, false),
+    upsertDayNote: (date: string, notes_md: string) =>
+      req<DayNote>(`${base}/day-notes/${date}`, {
+        method: 'PUT',
+        body: JSON.stringify({ notes_md }),
+      }),
+    parseText: (raw_text: string) =>
+      req<ParseTextResponse>(`${base}/items/parse`, {
+        method: 'POST',
+        body: JSON.stringify({ raw_text }),
+      }),
+  };
+}
