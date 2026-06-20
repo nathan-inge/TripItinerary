@@ -6,7 +6,7 @@ host can run both apps.
 
 ## Prereqs
 
-- A Linux CloudDesktop reachable via SSH (`tripit-cd` in examples).
+- A Linux CloudDesktop reachable via SSH (`marvin` — Nathan's CloudDesktop host).
 - `cloudflared` installed on the CloudDesktop with a Tunnel that fronts
   `*.nathaninge.com`. If you already deployed CTO this is done.
 - A Cloudflare Access "team" set up at `<team>.cloudflareaccess.com`.
@@ -15,7 +15,7 @@ host can run both apps.
 ## 1. CloudDesktop: install Rust + Node
 
 ```bash
-ssh tripit-cd
+ssh marvin
 # Rust 1.94+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 # Node 20+
@@ -85,8 +85,10 @@ won't refuse to start if it's missing.
 From your Mac:
 
 ```bash
-REMOTE=tripit-cd make deploy
+make deploy
 ```
+
+(`marvin` is the default remote; override with `REMOTE=other-host make deploy`.)
 
 That rsyncs the source, runs `make build` remotely, installs the binary at
 `~/.local/bin/tripit` and the unit at `~/.config/systemd/user/tripit.service`,
@@ -112,7 +114,7 @@ curl http://127.0.0.1:5050/api/health
 ## Subsequent deploys
 
 ```bash
-REMOTE=tripit-cd make deploy
+make deploy
 ```
 
 Same idempotent flow. SQLite at `~/.tripit/db.sqlite` is untouched.

@@ -36,7 +36,7 @@ Open <http://localhost:3001>.
 
 `travel.nathaninge.com` behind Cloudflare Access on a CloudDesktop. See
 **[DEPLOY.md](./DEPLOY.md)** for the end-to-end walkthrough (one-time tunnel
-+ CF Access setup, then `REMOTE=tripit-cd make deploy` thereafter).
++ CF Access setup, then `make deploy` thereafter — defaults to remote `marvin`).
 
 Configuration lives in `~/.config/tripit/env`; see [`.env.example`](./.env.example).
 

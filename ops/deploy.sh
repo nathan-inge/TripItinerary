@@ -2,11 +2,11 @@
 # Rsync source to a remote CloudDesktop, build there, install the binary,
 # install/refresh the systemd user unit, restart the service.
 #
-#   REMOTE=user@tripit-cd ops/deploy.sh
+#   REMOTE=marvin ops/deploy.sh   (or just ops/deploy.sh — marvin is the default)
 
 set -euo pipefail
 
-REMOTE="${REMOTE:-tripit-cd}"
+REMOTE="${REMOTE:-marvin}"
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ">> syncing source to $REMOTE"

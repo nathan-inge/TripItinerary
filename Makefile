@@ -27,7 +27,7 @@ clean:
 	rm -rf frontend/node_modules frontend/dist
 
 # Deploy: rsync source to CloudDesktop, build remotely, restart service.
-# Override REMOTE: make deploy REMOTE=user@tripit-cd
+# Defaults to REMOTE=marvin; override with: make deploy REMOTE=other-host
 deploy:
 	./ops/deploy.sh
 
