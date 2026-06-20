@@ -83,11 +83,18 @@ pub async fn get_trip(
             .bind(&id)
             .fetch_all(&state.pool)
             .await?;
+    let email_senders: Vec<crate::models::TripEmailSender> = sqlx::query_as(
+        "SELECT * FROM trip_email_senders WHERE trip_id = ?1 ORDER BY email",
+    )
+    .bind(&id)
+    .fetch_all(&state.pool)
+    .await?;
     Ok(Json(TripDetail {
         trip,
         travelers,
         items,
         day_notes,
+        email_senders,
     }))
 }
 

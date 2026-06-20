@@ -53,10 +53,17 @@ export interface DayNote {
   updated_at: string;
 }
 
+export interface TripEmailSender {
+  trip_id: string;
+  email: string;
+  created_at: string;
+}
+
 export interface TripDetail extends Trip {
   travelers: Traveler[];
   items: Item[];
   day_notes: DayNote[];
+  email_senders: TripEmailSender[];
 }
 
 export interface CreateTrip {

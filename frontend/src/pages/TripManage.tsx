@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { TripDetail } from '../api/types';
 import ShareLinkManager from '../components/ShareLinkManager';
+import EmailSenders from '../components/EmailSenders';
 
 export default function TripManage() {
   const { id } = useParams<{ id: string }>();
@@ -99,6 +100,13 @@ export default function TripManage() {
       </section>
 
       <ShareLinkManager tripId={data.id} />
+
+      <EmailSenders
+        tripId={data.id}
+        tripName={data.name}
+        initialSenders={data.email_senders}
+        onChange={load}
+      />
 
       <section className="space-y-3 rounded-xl border border-red-200 bg-red-50/50 p-4">
         <h2 className="text-lg font-semibold text-red-800">Danger zone</h2>

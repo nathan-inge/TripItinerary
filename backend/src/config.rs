@@ -12,6 +12,7 @@ pub struct Config {
     pub anthropic_api_key: Option<String>,
     pub parse_model: String,
     pub daily_token_cap: u64,
+    pub email_hmac_key: Option<String>,
 }
 
 impl Config {
@@ -33,6 +34,7 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(200_000);
+        let email_hmac_key = std::env::var("TRIPIT_EMAIL_HMAC_KEY").ok();
 
         if !dev_bypass_auth && (cf_access_team_domain.is_none() || cf_access_aud.is_none()) {
             tracing::warn!(
@@ -56,6 +58,7 @@ impl Config {
             anthropic_api_key,
             parse_model,
             daily_token_cap,
+            email_hmac_key,
         })
     }
 }

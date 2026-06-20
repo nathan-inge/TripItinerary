@@ -123,10 +123,10 @@ hex string). That's the one — and only one — that goes in `CF_ACCESS_AUD`
 below. App 1 issues no JWT (Bypass passes the request through unmodified),
 so its AUD is unused.
 
-> **M5 deferred.** When email intake (M5) ships, you'll add a third App at
-> path `/api/intake/email` with Action = Service Auth and a Service Token
-> created in Zero Trust → Access → Service Auth. It needs its own service
-> token before it can be saved.
+> **For email intake (optional, see §7).** When you stand up the Email
+> Worker, you'll add a third App scoped to path `/api/intake/email` with
+> Action = Service Auth and a Service Token. Skip until you're ready to
+> wire up forwarding.
 
 ## 4. Provision secrets on the CloudDesktop
 
@@ -140,6 +140,7 @@ OWNER_EMAIL=nate8983@gmail.com
 # Optional overrides:
 # TRIPIT_PARSE_MODEL=claude-haiku-4-5-20251001   # cheaper fallback
 # TRIPIT_DAILY_TOKEN_CAP=200000
+# TRIPIT_EMAIL_HMAC_KEY=<hex from openssl rand -hex 32>  # required for §7
 EOF
 chmod 600 ~/.config/tripit/env
 ```
@@ -189,6 +190,110 @@ make deploy
 
 Same idempotent flow. SQLite at `~/.tripit/db.sqlite` is untouched.
 
+## 7. Email intake (optional)
+
+Lets allow-listed senders forward booking confirmations to a magic
+address; the backend matches them to a trip by the trip-name line at the
+top of the body and parses the rest with Claude. End-to-end setup:
+
+### 7.1 DNS — MX records for the intake subdomain
+
+The apex `nathaninge.com` keeps its existing mail. Put intake on a
+subdomain (`in.nathaninge.com`) so they don't collide. In Cloudflare
+DNS, add MX records for the `in` subdomain pointing at Cloudflare's
+email-routing servers:
+
+```
+in.nathaninge.com   MX 10  route1.mx.cloudflare.net
+in.nathaninge.com   MX 20  route2.mx.cloudflare.net
+in.nathaninge.com   MX 50  route3.mx.cloudflare.net
+```
+
+### 7.2 Enable Email Routing on the subdomain
+
+Dashboard → **Email → Email Routing** → enable for `in.nathaninge.com`.
+(You'll briefly see a "verifying MX records" step. Wait until it goes
+green.)
+
+### 7.3 Mint shared secrets
+
+```bash
+# on your Mac
+openssl rand -hex 32              # save as TRIPIT_EMAIL_HMAC_KEY everywhere
+```
+
+In Zero Trust → **Access → Service Auth → Service Tokens**, create a
+token named `tripit-email-worker`. Save the **Client ID** and **Client
+Secret** — you'll need both.
+
+Add the HMAC key to the backend env on marvin and restart:
+
+```bash
+ssh marvin
+echo 'TRIPIT_EMAIL_HMAC_KEY=<your-32-byte-hex>' >> ~/.config/tripit/env
+systemctl --user restart tripit
+```
+
+### 7.4 CF Access App for `/api/intake/email`
+
+In Zero Trust → Access → Applications, add a third app on
+`travel.nathaninge.com`:
+
+| Field   | Value                                                       |
+|---------|-------------------------------------------------------------|
+| Type    | Self-hosted                                                 |
+| Name    | `tripit email worker`                                       |
+| Domain  | `travel.nathaninge.com`                                     |
+| **Path** | `/api/intake/email`                                        |
+
+Policy:
+
+| Field   | Value                                                       |
+|---------|-------------------------------------------------------------|
+| Name    | `Email worker`                                              |
+| Action  | **Service Auth**                                            |
+| Include | **Service Token** → `tripit-email-worker`                   |
+
+Path-specificity puts this above the hostname-scoped Owner app, so the
+Worker's POSTs are allowed; everything else still needs owner SSO.
+
+### 7.5 Deploy the Worker
+
+```bash
+cd ops/email-worker
+npm install
+npx wrangler login                                   # if not already
+npx wrangler secret put TRIPIT_EMAIL_HMAC_KEY        # same hex as backend
+npx wrangler secret put CF_ACCESS_CLIENT_ID          # from §7.3
+npx wrangler secret put CF_ACCESS_CLIENT_SECRET      # from §7.3
+npx wrangler deploy
+```
+
+### 7.6 Route the address to the Worker
+
+Email Routing → **Routing rules** → Create a rule:
+- Match: `trips@in.nathaninge.com`
+- Action: **Send to a Worker** → `tripit-email-worker`
+
+### 7.7 Add allow-listed senders to a trip
+
+In the app, open a trip's **Manage** page and use **Forward by email**
+to add at least one sender (yourself, to start). They can then forward
+a confirmation to `trips@in.nathaninge.com` with the trip name on the
+first line of the body:
+
+```
+Japan, autumn 2026
+
+---------- Forwarded message ----------
+From: Delta Air Lines <noreply@delta.com>
+...
+```
+
+Watch `journalctl --user -u tripit -f` while you test. The backend
+silently drops emails whose trip-name doesn't match or whose sender
+isn't on the allow-list — failures are logged, not bounced.
+
 ## Backup
 
 ```bash
@@ -234,3 +339,10 @@ If migrations have moved forward and you need to roll the schema back, restore t
   App 2's Overview page; team domain from Zero Trust → Settings.
 - **Parsing returns 400** — `ANTHROPIC_API_KEY` is unset in
   `~/.config/tripit/env`. Set it and `systemctl --user restart tripit`.
+- **Forwarded email doesn't appear on the trip** — most likely one of:
+  (a) the body doesn't start with the exact trip name (case-insensitive,
+  whitespace-normalized match — punctuation matters); (b) the sender's
+  address isn't on the trip's allow-list (Manage → Forward by email);
+  (c) the HMAC keys don't match between the Worker and the backend.
+  Tail `journalctl --user -u tripit -f` while you send a test — the
+  reason is logged at `INFO` level.

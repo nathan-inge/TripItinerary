@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use utoipa::ToSchema;
 
-use super::{DayNote, Item, Traveler};
+use super::{DayNote, Item, Traveler, TripEmailSender};
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Trip {
@@ -24,6 +24,7 @@ pub struct TripDetail {
     pub travelers: Vec<Traveler>,
     pub items: Vec<Item>,
     pub day_notes: Vec<DayNote>,
+    pub email_senders: Vec<TripEmailSender>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

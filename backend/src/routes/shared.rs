@@ -110,6 +110,8 @@ async fn get_trip(
             travelers,
             items,
             day_notes,
+            // Email-sender allow-list is owner-level config; guests don't see it.
+            email_senders: vec![],
         },
         share_scope: access.scope,
     }))

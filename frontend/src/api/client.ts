@@ -78,6 +78,18 @@ export const api = {
     }),
   revokeShareLink: (id: string) =>
     req<void>(`/share-links/${id}`, { method: 'DELETE' }, false),
+
+  addEmailSender: (tripId: string, email: string) =>
+    req<{ trip_id: string; email: string; created_at: string }>(
+      `/trips/${tripId}/email-senders`,
+      { method: 'POST', body: JSON.stringify({ email }) },
+    ),
+  removeEmailSender: (tripId: string, email: string) =>
+    req<void>(
+      `/trips/${tripId}/email-senders/${encodeURIComponent(email)}`,
+      { method: 'DELETE' },
+      false,
+    ),
 };
 
 // Returns a token-scoped API for the guest /share/:token page.
