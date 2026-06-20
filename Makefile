@@ -27,14 +27,9 @@ clean:
 	rm -rf frontend/node_modules frontend/dist
 
 # Deploy: rsync source to CloudDesktop, build remotely, restart service.
-# Override REMOTE on the command line: make deploy REMOTE=user@tripit-cd
-REMOTE ?= tripit-cd
+# Override REMOTE: make deploy REMOTE=user@tripit-cd
 deploy:
-	rsync -avz --exclude target --exclude node_modules --exclude dist \
-		./ $(REMOTE):~/tripit-src/
-	ssh $(REMOTE) 'cd ~/tripit-src && make build && \
-		install -D backend/target/release/tripit ~/.local/bin/tripit && \
-		systemctl --user restart tripit'
+	./ops/deploy.sh
 
 install-service:
 	install -D ops/tripit.service ~/.config/systemd/user/tripit.service

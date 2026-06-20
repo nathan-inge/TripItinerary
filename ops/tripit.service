@@ -1,0 +1,24 @@
+[Unit]
+Description=TripItinerary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tripit
+Restart=on-failure
+RestartSec=3
+
+# Required config. Override via the EnvironmentFile below.
+Environment=DATABASE_URL=sqlite://%h/.tripit/db.sqlite?mode=rwc
+Environment=BIND_ADDR=127.0.0.1:5050
+Environment=RUST_LOG=tripit=info,tower_http=info
+
+# Per-host secrets: ANTHROPIC_API_KEY, CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD,
+# TRIPIT_EMAIL_HMAC_KEY (when M5 lands), and any overrides. Create this file
+# as 0600 root-owned and put one VAR=value per line. EnvironmentFile is
+# optional — `-` swallows the error if it isn't there yet.
+EnvironmentFile=-%h/.config/tripit/env
+
+[Install]
+WantedBy=default.target
