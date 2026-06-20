@@ -77,7 +77,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   revokeShareLink: (id: string) =>
-    req<void>(`/share/${id}`, { method: 'DELETE' }, false),
+    req<void>(`/share-links/${id}`, { method: 'DELETE' }, false),
 };
 
 // Returns a token-scoped API for the guest /share/:token page.

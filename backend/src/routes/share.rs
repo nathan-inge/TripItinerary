@@ -16,7 +16,12 @@ use crate::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/trips/:trip_id/share", get(list_links).post(create_link))
-        .route("/share/:id", axum::routing::delete(revoke_link))
+        // Note: this lives under /share-links/, NOT /share/. The /share/*
+        // prefix is reserved for guest token-bearing routes (which CF Access
+        // bypasses entirely); putting an owner-protected endpoint under
+        // that prefix would collide with the CF Access Bypass rule and the
+        // JWT header would never reach the owner middleware.
+        .route("/share-links/:id", axum::routing::delete(revoke_link))
 }
 
 pub async fn list_links(
