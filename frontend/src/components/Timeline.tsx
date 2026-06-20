@@ -37,10 +37,40 @@ function eachDate(start: string, end: string): string[] {
   return out;
 }
 
-interface LodgingSpan {
+// A multi-day "held" item rendered with continuation banners on each
+// intermediate day and an end-day banner. Lodging (any duration ≥ 0) and
+// transport with endDate > startDate qualify. Flights are deliberately
+// excluded — you're not "still on the flight" the next day, you've arrived.
+interface Span {
   item: Item;
+  kind: 'lodging' | 'transport';
   startDate: string;
-  endDate: string; // exclusive
+  endDate: string;
+}
+
+const SPAN_STYLE: Record<Span['kind'], { icon: string; box: string; end: string }> = {
+  lodging: {
+    icon: '🛏',
+    box: 'border-amber-200 bg-amber-50/60 text-amber-900',
+    end: 'check-out',
+  },
+  transport: {
+    icon: '🚆',
+    box: 'border-violet-200 bg-violet-50/60 text-violet-900',
+    end: 'drop-off',
+  },
+};
+
+function spanFor(item: Item): Span | null {
+  const startDate = isoDate(item.start_at);
+  const endDate = item.end_at ? isoDate(item.end_at) : startDate;
+  if (item.type === 'lodging') {
+    return { item, kind: 'lodging', startDate, endDate };
+  }
+  if (item.type === 'transport' && endDate > startDate) {
+    return { item, kind: 'transport', startDate, endDate };
+  }
+  return null;
 }
 
 export default function Timeline({
@@ -55,11 +85,8 @@ export default function Timeline({
   const days = eachDate(trip.start_date, trip.end_date);
   const travelers: Traveler[] = trip.travelers;
 
-  // Lodgings get split-rendered: an editable ItemCard on the check-in day
-  // (so you can click to edit), and a smaller "stay continues" banner on
-  // subsequent covered nights for orientation.
   const itemsByDay = new Map<string, Item[]>();
-  const lodgingSpans: LodgingSpan[] = [];
+  const spans: Span[] = [];
 
   for (const item of items) {
     const d = isoDate(item.start_at);
@@ -67,31 +94,26 @@ export default function Timeline({
     list.push(item);
     itemsByDay.set(d, list);
 
-    if (item.type === 'lodging') {
-      const startDate = d;
-      const endDate = item.end_at ? isoDate(item.end_at) : startDate;
-      lodgingSpans.push({ item, startDate, endDate });
-    }
+    const s = spanFor(item);
+    if (s) spans.push(s);
   }
 
   const noteFor = (date: string) =>
     dayNotes.find((n) => n.date === date)?.notes_md ?? '';
 
-  const isContinuingStay = (s: LodgingSpan, date: string) =>
+  const isContinuing = (s: Span, date: string) =>
     s.endDate > s.startDate && date > s.startDate && date < s.endDate;
 
   return (
     <div className="space-y-6">
       {days.map((date) => {
-        const continuingStays = lodgingSpans.filter((s) =>
-          isContinuingStay(s, date),
-        );
-        const checkoutsToday = lodgingSpans.filter(
+        const continuing = spans.filter((s) => isContinuing(s, date));
+        const endsToday = spans.filter(
           (s) => s.endDate === date && s.endDate > s.startDate,
         );
-        const dayItems = (itemsByDay.get(date) ?? []).slice().sort((a, b) =>
-          a.start_at.localeCompare(b.start_at),
-        );
+        const dayItems = (itemsByDay.get(date) ?? [])
+          .slice()
+          .sort((a, b) => a.start_at.localeCompare(b.start_at));
 
         return (
           <section key={date} className="space-y-2">
@@ -103,29 +125,20 @@ export default function Timeline({
               readOnly={readOnly}
             />
 
-            {continuingStays.map(({ item }) => (
-              <div
-                key={`stay-${item.id}-${date}`}
-                className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-900"
-              >
-                <span aria-hidden>🛏 </span>
-                <span className="font-medium">{item.title}</span>
-                {item.location && (
-                  <span className="text-amber-800/80"> · {item.location}</span>
-                )}
-                <span className="ml-2 text-xs text-amber-800/70">stay continues</span>
-              </div>
+            {continuing.map((s) => (
+              <SpanBanner
+                key={`cont-${s.item.id}-${date}`}
+                span={s}
+                label={s.kind === 'lodging' ? 'stay continues' : 'rental continues'}
+              />
             ))}
 
-            {checkoutsToday.map(({ item }) => (
-              <div
-                key={`checkout-${item.id}-${date}`}
-                className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-900"
-              >
-                <span aria-hidden>🛏 </span>
-                <span className="font-medium">{item.title}</span>
-                <span className="ml-2 text-xs text-amber-800/70">check-out</span>
-              </div>
+            {endsToday.map((s) => (
+              <SpanBanner
+                key={`end-${s.item.id}-${date}`}
+                span={s}
+                label={SPAN_STYLE[s.kind].end}
+              />
             ))}
 
             {dayItems.map((item) => (
@@ -144,8 +157,8 @@ export default function Timeline({
             ))}
 
             {dayItems.length === 0 &&
-              continuingStays.length === 0 &&
-              checkoutsToday.length === 0 &&
+              continuing.length === 0 &&
+              endsToday.length === 0 &&
               !noteFor(date) && (
                 <p className="text-xs text-slate-400">No items.</p>
               )}
@@ -155,3 +168,19 @@ export default function Timeline({
     </div>
   );
 }
+
+function SpanBanner({ span, label }: { span: Span; label: string }) {
+  const style = SPAN_STYLE[span.kind];
+  const { item } = span;
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-sm ${style.box}`}
+    >
+      <span aria-hidden>{style.icon} </span>
+      <span className="font-medium">{item.title}</span>
+      {item.location && <span className="opacity-80"> · {item.location}</span>}
+      <span className="ml-2 text-xs opacity-70">{label}</span>
+    </div>
+  );
+}
+
