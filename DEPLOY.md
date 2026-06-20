@@ -57,42 +57,53 @@ sudo systemctl status cloudflared --no-pager
 
 ## 3. Cloudflare Access: protect the subdomain
 
-The trick: this hostname needs **two** Access Applications, scoped by path,
-because the share-link flow has to skip SSO entirely while the rest of the
-API needs your Google identity. Everything outside `/api/*` (the SPA shell,
-manifest, JS bundles) is implicitly unprotected — that's intentional, since
-the bundle contains no secrets and all data sits behind the API.
+This hostname needs **two** Access Applications. The owner App must gate
+the **entire hostname** (not just `/api/*`) so the SSO challenge happens at
+page-load time — browsers can follow SSO redirects on a navigation, but
+they can't follow them on a cross-origin `fetch()` (CORS blocks the
+preflight). Gating only `/api/*` would mean the SPA boots without a
+session, then its first `fetch('/api/trips')` triggers a 302 → CORS error.
+
+The Bypass App therefore has to enumerate every path a guest needs to
+reach without SSO — the share routes and the SPA's static assets. The
+shell contains no secrets; bypassing it is safe.
 
 In Cloudflare dashboard → **Zero Trust → Access → Applications**, create
 both apps under the same `travel.nathaninge.com` hostname:
 
-### App 1 — Share-link bypass
+### App 1 — Public bypass
 
-| Field           | Value                                  |
-|-----------------|----------------------------------------|
-| Type            | Self-hosted                            |
-| Name            | `tripit share bypass`                  |
-| Domain          | `travel.nathaninge.com`                |
-| **Path**        | `/api/share/*`                         |
-| Session         | (anything, irrelevant for Bypass)      |
+| Field   | Value                                                                                      |
+|---------|--------------------------------------------------------------------------------------------|
+| Type    | Self-hosted                                                                                |
+| Name    | `tripit public bypass`                                                                     |
+| Domain  | `travel.nathaninge.com`                                                                    |
+| **Paths** | Add **each** as a separate entry in the Paths list:                                      |
+|         | `/share/*` — guest SPA route                                                               |
+|         | `/api/share/*` — guest API                                                                 |
+|         | `/assets/*` — Vite-fingerprinted JS/CSS bundles                                            |
+|         | `/manifest.webmanifest` — PWA manifest                                                     |
+|         | `/sw.js` — service worker                                                                  |
+|         | `/workbox-*` — service-worker deps                                                         |
+|         | `/icon.svg` — PWA icon                                                                     |
 
 One policy:
 
-| Field    | Value     |
-|----------|-----------|
-| Name     | `Bypass`  |
-| Action   | **Bypass** |
+| Field    | Value        |
+|----------|--------------|
+| Name     | `Bypass`     |
+| Action   | **Bypass**   |
 | Include  | **Everyone** |
 
-### App 2 — Owner (SSO)
+### App 2 — Owner (SSO, whole hostname)
 
-| Field           | Value                                  |
-|-----------------|----------------------------------------|
-| Type            | Self-hosted                            |
-| Name            | `tripit owner`                         |
-| Domain          | `travel.nathaninge.com`                |
-| **Path**        | `/api/*`                               |
-| Session         | 24h (or whatever you prefer)           |
+| Field      | Value                                                  |
+|------------|--------------------------------------------------------|
+| Type       | Self-hosted                                            |
+| Name       | `tripit owner`                                         |
+| Domain     | `travel.nathaninge.com`                                |
+| **Path**   | *(leave blank — covers the whole hostname)*            |
+| Session    | 24h (or whatever you prefer)                           |
 
 One policy:
 
@@ -102,10 +113,10 @@ One policy:
 | Action   | **Allow**                                   |
 | Include  | **Emails** → `nate8983@gmail.com`           |
 
-Cloudflare matches the most-specific path first, so `/api/share/<token>/...`
-hits App 1 (Bypass) and everything else under `/api/*` hits App 2 (SSO
-required). Paths outside `/api/*` are not gated by any Application and pass
-through to the app, which serves the SPA shell.
+Cloudflare matches the most-specific path first, so the App 1 paths
+(share routes + static assets) hit Bypass; everything else on the
+hostname (`/`, `/trips/<id>`, `/api/trips`, `/api/health`, …) hits Owner
+SSO.
 
 After saving **App 2**, copy its **AUD tag** from the Overview page (long
 hex string). That's the one — and only one — that goes in `CF_ACCESS_AUD`
@@ -203,15 +214,21 @@ If migrations have moved forward and you need to roll the schema back, restore t
 - **`tripit.service` won't start** — `journalctl --user -u tripit -n 50`.
   Most common: missing `~/.tripit/` (the unit creates this on first run
   but only if it can write to `$HOME`).
+- **Owner view: CORS error redirecting `/api/trips` → `<team>.cloudflareaccess.com/cdn-cgi/access/login/...`**
+  — Owner App 2 is scoped to `/api/*` only, so the SPA shell loads
+  without a CF Access session, and the first XHR triggers an SSO redirect
+  that the browser can't follow cross-origin. Fix: re-scope App 2 to
+  the **whole hostname** (no path), and add the SPA's static assets
+  (`/assets/*`, `/manifest.webmanifest`, `/sw.js`, `/workbox-*`, `/icon.svg`)
+  to App 1's Bypass paths so guests still load them without SSO. Hard-reload
+  (Cmd-Shift-R) to drop the cached redirect and the stale service worker.
 - **Share link → CORS error fetching `/manifest.webmanifest` (or `/assets/*`)**
-  — App 2 (Owner) is scoped to the whole hostname instead of `/api/*`.
-  Re-scope App 2 to path `/api/*` so static assets pass through with no
-  Access enforcement. Hard-reload (Cmd-Shift-R) to drop the cached redirect
-  and the stale service worker.
-- **`401 unauthorized` on every share-link API call** — App 1's path is
-  wrong. It must be `/api/share/*`, not `/share/*`. The frontend route
-  `/share/<token>` is just the SPA shell entry point; the actual data
-  fetches go to `/api/share/<token>/trip`.
+  — Same root cause as above: a static-asset path isn't in App 1's
+  Bypass list. Add it.
+- **`401 unauthorized` on every share-link API call** — App 1 is missing
+  `/api/share/*` from its Paths. The frontend route `/share/<token>` is
+  just the SPA shell entry point; the data fetches go to `/api/share/<token>/trip`,
+  which is a separate path entry.
 - **JWT errors in logs (`kid not in JWKS`, `invalid audience`)** —
   `CF_ACCESS_AUD` or `CF_ACCESS_TEAM_DOMAIN` is wrong. Re-copy AUD from
   App 2's Overview page; team domain from Zero Trust → Settings.
