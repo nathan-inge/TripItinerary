@@ -18,7 +18,7 @@ use crate::models::{
     CreateItem, DayNote, Item, ItemPreview, ParseTextRequest, ParseTextResponse, ShareScope,
     SharedTripDetail, Traveler, Trip, TripDetail, UpdateItem, UpdateTrip, UpsertDayNote,
 };
-use crate::parse::claude::estimate_tokens;
+use crate::parse::prompt::estimate_tokens;
 use crate::routes::items as items_routes;
 use crate::routes::travelers as travelers_routes;
 use crate::AppState;
@@ -312,17 +312,16 @@ async fn parse_text(
     if raw_text.len() > 50_000 {
         return Err(AppError::BadRequest("raw_text exceeds 50 KB limit".into()));
     }
-    let claude = state
-        .claude
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("ANTHROPIC_API_KEY not configured".into()))?;
+    let parser = state.parser.as_ref().ok_or_else(|| {
+        AppError::BadRequest("no parse backend configured".into())
+    })?;
     let est = estimate_tokens(raw_text);
     state
         .token_cap
         .check_and_reserve(est, state.cfg.daily_token_cap)
         .await
         .map_err(AppError::BadRequest)?;
-    let (parsed, actual) = match claude.parse_item(raw_text).await {
+    let (parsed, actual) = match parser.parse_item(raw_text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;

@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::error::AppResult;
 use crate::models::{ItemSource, ParseStatus};
-use crate::parse::claude::estimate_tokens;
+use crate::parse::prompt::estimate_tokens;
 use crate::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -143,9 +143,9 @@ pub async fn intake(
         format!("Subject: {}\n\n{}", email.subject, raw_text)
     };
 
-    let Some(claude) = state.claude.as_ref() else {
+    let Some(parser) = state.parser.as_ref() else {
         tracing::warn!(
-            "intake/email matched trip {}, but ANTHROPIC_API_KEY unset; dropping",
+            "intake/email matched trip {}, but no parse backend configured; dropping",
             trip_name
         );
         return Ok(StatusCode::NO_CONTENT);
@@ -160,11 +160,11 @@ pub async fn intake(
         tracing::warn!("intake/email token cap: {e}; dropping");
         return Ok(StatusCode::NO_CONTENT);
     }
-    let (parsed, used) = match claude.parse_item(&prompt_text).await {
+    let (parsed, used) = match parser.parse_item(&prompt_text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;
-            tracing::error!("intake/email claude error: {e:#}; dropping");
+            tracing::error!("intake/email parser ({}) error: {e:#}; dropping", parser.kind());
             return Ok(StatusCode::NO_CONTENT);
         }
     };

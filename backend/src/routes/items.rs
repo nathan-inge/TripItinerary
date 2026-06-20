@@ -13,7 +13,7 @@ use crate::models::{
     CreateItem, Item, ItemPreview, ItemSource, ItemType, Link, ParseStatus,
     ParseTextRequest, ParseTextResponse, UpdateItem,
 };
-use crate::parse::claude::estimate_tokens;
+use crate::parse::prompt::estimate_tokens;
 use crate::routes::trips::require_trip_access;
 use crate::AppState;
 
@@ -47,10 +47,11 @@ pub async fn parse_text(
         ));
     }
 
-    let claude = state
-        .claude
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("ANTHROPIC_API_KEY not configured on server".into()))?;
+    let parser = state.parser.as_ref().ok_or_else(|| {
+        AppError::BadRequest(
+            "no parse backend configured (set TRIPIT_PARSE_BACKEND and credentials)".into(),
+        )
+    })?;
 
     let est = estimate_tokens(raw_text);
     state
@@ -59,7 +60,7 @@ pub async fn parse_text(
         .await
         .map_err(AppError::BadRequest)?;
 
-    let (parsed, actual) = match claude.parse_item(raw_text).await {
+    let (parsed, actual) = match parser.parse_item(raw_text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;

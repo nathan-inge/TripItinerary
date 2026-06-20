@@ -21,7 +21,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub cfg: Arc<config::Config>,
     pub jwks_client: auth::cf_access::JwksClient,
-    pub claude: Option<parse::ClaudeClient>,
+    pub parser: Option<parse::Parser>,
     pub token_cap: parse::TokenCap,
 }
 
@@ -47,16 +47,22 @@ async fn main() -> Result<()> {
     let pool = db::create_pool(&cfg.database_url).await?;
     db::run_migrations(&pool).await?;
 
-    let claude = cfg
-        .anthropic_api_key
-        .clone()
-        .map(|key| parse::ClaudeClient::new(key, cfg.parse_model.clone()));
+    let parser = match cfg.parse_backend {
+        config::ParseBackend::Anthropic => cfg
+            .anthropic_api_key
+            .clone()
+            .map(|k| parse::Parser::Claude(parse::claude::ClaudeClient::new(k, cfg.parse_model.clone()))),
+        config::ParseBackend::Ollama => Some(parse::Parser::Ollama(
+            parse::ollama::OllamaClient::new(cfg.ollama_url.clone(), cfg.ollama_model.clone()),
+        )),
+        config::ParseBackend::None => None,
+    };
 
     let state = AppState {
         pool: pool.clone(),
         cfg: Arc::new(cfg.clone()),
         jwks_client: auth::cf_access::JwksClient::default(),
-        claude,
+        parser,
         token_cap: parse::TokenCap::default(),
     };
 

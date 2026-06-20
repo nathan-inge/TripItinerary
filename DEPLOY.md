@@ -133,12 +133,24 @@ so its AUD is unused.
 ```bash
 mkdir -p ~/.config/tripit
 cat > ~/.config/tripit/env <<'EOF'
-ANTHROPIC_API_KEY=sk-ant-...
 CF_ACCESS_TEAM_DOMAIN=<your-team>.cloudflareaccess.com
 CF_ACCESS_AUD=<App 2 AUD from step 3>
 OWNER_EMAIL=nate8983@gmail.com
-# Optional overrides:
-# TRIPIT_PARSE_MODEL=claude-haiku-4-5-20251001   # cheaper fallback
+
+# Pick a parse backend (or omit to skip auto-extraction entirely — paste/
+# forward will store the raw text and you fill fields by hand).
+#
+# Option A (cloud, easier — confirmation text PII-redacted, then sent to
+# Anthropic; data not used for training, deleted at ≤30 days):
+ANTHROPIC_API_KEY=sk-ant-...
+# TRIPIT_PARSE_MODEL=claude-sonnet-4-6
+
+# Option B (local, recommended for privacy — text never leaves the host):
+# TRIPIT_PARSE_BACKEND=ollama
+# TRIPIT_OLLAMA_URL=http://localhost:11434
+# TRIPIT_OLLAMA_MODEL=qwen2.5:7b-instruct
+# See §8 below for Ollama install.
+
 # TRIPIT_DAILY_TOKEN_CAP=200000
 # TRIPIT_EMAIL_HMAC_KEY=<hex from openssl rand -hex 32>  # required for §7
 EOF
@@ -293,6 +305,62 @@ From: Delta Air Lines <noreply@delta.com>
 Watch `journalctl --user -u tripit -f` while you test. The backend
 silently drops emails whose trip-name doesn't match or whose sender
 isn't on the allow-list — failures are logged, not bounced.
+
+## 8. Privacy: local parsing with Ollama (optional)
+
+Forwarded confirmations contain traveler names, PNRs, and sometimes
+last-4 of card. The Anthropic API doesn't train on customer content
+and retains for ≤30 days, but if you'd rather keep that text on the
+host entirely, run the parser against a local Ollama instance.
+
+The PII redactor runs on both backends — payment cards (Luhn-checked),
+SSNs, phone numbers, and naked emails outside URLs are scrubbed before
+the LLM sees them. With Ollama selected as the backend, nothing leaves
+the host at all.
+
+### 8.1 Install Ollama on marvin
+
+```bash
+ssh marvin
+curl -fsSL https://ollama.com/install.sh | sh
+# pulls ~4.7GB for qwen2.5; runs once at first inference
+ollama pull qwen2.5:7b-instruct
+# verify it answers
+ollama run qwen2.5:7b-instruct "Reply with only the word ok."
+```
+
+Ollama installs as a systemd service listening on `127.0.0.1:11434`.
+
+### 8.2 Switch tripit to the local backend
+
+```bash
+cat >> ~/.config/tripit/env <<'EOF'
+TRIPIT_PARSE_BACKEND=ollama
+TRIPIT_OLLAMA_URL=http://localhost:11434
+TRIPIT_OLLAMA_MODEL=qwen2.5:7b-instruct
+EOF
+systemctl --user restart tripit
+journalctl --user -u tripit -n 10 | grep 'parse backend'
+# expect: "parse backend = ollama at http://localhost:11434 ..."
+```
+
+### 8.3 Model picks
+
+| Model                       | Size | Notes                                                |
+|-----------------------------|------|------------------------------------------------------|
+| `qwen2.5:7b-instruct`       | 4.7G | Recommended. Strong at structured-output extraction. |
+| `llama3.1:8b-instruct`      | 4.7G | Comparable; pick if Qwen JSON adherence is shaky.    |
+| `qwen2.5:14b-instruct`      | 9.0G | Better recall on tricky multi-leg confirmations.     |
+| `gemma2:9b-instruct`        | 5.4G | Decent alternative.                                  |
+
+On CPU expect 5–20 s per parse for 7B models; sub-second on a GPU.
+Email intake is async so latency isn't a UX issue.
+
+### 8.4 Going back to Anthropic
+
+Just remove `TRIPIT_PARSE_BACKEND=ollama` from the env (or set it to
+`anthropic`) and `systemctl --user restart tripit`. The Anthropic
+client still applies the same PII redactor before the request leaves.
 
 ## Backup
 
