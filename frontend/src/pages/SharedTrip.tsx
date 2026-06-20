@@ -4,6 +4,7 @@ import { shareApi } from '../api/client';
 import type { CreateItem, Item, SharedTripDetail } from '../api/types';
 import Timeline from '../components/Timeline';
 import AddItemForm from '../components/AddItemForm';
+import EmailIntakeHint from '../components/EmailIntakeHint';
 import PasteParseForm from '../components/PasteParseForm';
 
 type AddMode = 'closed' | 'manual' | 'paste';
@@ -114,6 +115,12 @@ export default function SharedTrip() {
               {addMode === 'manual' ? 'Cancel' : '+ Add manually'}
             </button>
           </div>
+
+          <EmailIntakeHint
+            tripId={data.id}
+            tripName={data.name}
+            manageHref={null}
+          />
 
           {addMode === 'paste' && (
             <SharedPasteForm

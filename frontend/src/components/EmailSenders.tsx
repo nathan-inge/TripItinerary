@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { api } from '../api/client';
 import type { TripEmailSender } from '../api/types';
+import { INTAKE_ADDRESS } from '../lib/intake';
 
 interface Props {
   tripId: string;
@@ -8,11 +9,6 @@ interface Props {
   initialSenders: TripEmailSender[];
   onChange: () => void | Promise<void>;
 }
-
-// Substitute the user's real intake address at build/runtime via a meta tag
-// or env var if it varies. For now the canonical address is hard-coded; the
-// trip-name prefix is what routes each forward to the right trip.
-const INTAKE_ADDRESS = 'trips@in.nathaninge.com';
 
 export default function EmailSenders({
   tripId,
