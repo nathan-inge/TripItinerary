@@ -2,6 +2,7 @@ import type {
   CreateItem,
   DayNote,
   Item,
+  ItemType,
   Traveler,
   TripDetail,
 } from '../api/types';
@@ -61,6 +62,13 @@ const SPAN_STYLE: Record<Span['kind'], { icon: string; box: string; end: string 
   },
 };
 
+const TYPE_DOT: Record<ItemType, string> = {
+  flight: 'bg-sky-500',
+  lodging: 'bg-amber-500',
+  transport: 'bg-violet-500',
+  activity: 'bg-emerald-500',
+};
+
 function spanFor(item: Item): Span | null {
   const startDate = isoDate(item.start_at);
   const endDate = item.end_at ? isoDate(item.end_at) : startDate;
@@ -105,8 +113,8 @@ export default function Timeline({
     s.endDate > s.startDate && date > s.startDate && date < s.endDate;
 
   return (
-    <div className="space-y-6">
-      {days.map((date) => {
+    <div className="space-y-5">
+      {days.map((date, dayIdx) => {
         const continuing = spans.filter((s) => isContinuing(s, date));
         const endsToday = spans.filter(
           (s) => s.endDate === date && s.endDate > s.startDate,
@@ -116,52 +124,74 @@ export default function Timeline({
           .sort((a, b) => a.start_at.localeCompare(b.start_at));
 
         return (
-          <section key={date} className="space-y-2">
-            <DayHeader date={date} />
-
-            <DayNotesEditor
-              initialValue={noteFor(date)}
-              onSave={(v) => onSaveDayNote(date, v)}
-              readOnly={readOnly}
+          <section key={date} className="relative pl-10">
+            {/* spine */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute left-5 top-3 bottom-0 w-px bg-slate-200"
             />
 
-            {continuing.map((s) => (
-              <SpanBanner
-                key={`cont-${s.item.id}-${date}`}
-                span={s}
-                label={s.kind === 'lodging' ? 'stay continues' : 'rental continues'}
-              />
-            ))}
+            {/* day marker on the spine */}
+            <span
+              aria-hidden
+              className="absolute left-[8px] top-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-semibold tabular-nums text-slate-600 shadow-sm"
+            >
+              {dayIdx + 1}
+            </span>
 
-            {endsToday.map((s) => (
-              <SpanBanner
-                key={`end-${s.item.id}-${date}`}
-                span={s}
-                label={SPAN_STYLE[s.kind].end}
-              />
-            ))}
+            <DayHeader date={date} />
 
-            {dayItems.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                travelers={travelers}
-                onDelete={() => onDeleteItem(item)}
-                onUpdate={
-                  onUpdateItem
-                    ? (body) => onUpdateItem(item, body)
-                    : undefined
-                }
+            <div className="mt-2 space-y-2">
+              <DayNotesEditor
+                initialValue={noteFor(date)}
+                onSave={(v) => onSaveDayNote(date, v)}
                 readOnly={readOnly}
               />
-            ))}
 
-            {dayItems.length === 0 &&
-              continuing.length === 0 &&
-              endsToday.length === 0 &&
-              !noteFor(date) && (
-                <p className="text-xs text-slate-400">No items.</p>
-              )}
+              {continuing.map((s) => (
+                <SpanBanner
+                  key={`cont-${s.item.id}-${date}`}
+                  span={s}
+                  label={s.kind === 'lodging' ? 'stay continues' : 'rental continues'}
+                />
+              ))}
+
+              {endsToday.map((s) => (
+                <SpanBanner
+                  key={`end-${s.item.id}-${date}`}
+                  span={s}
+                  label={SPAN_STYLE[s.kind].end}
+                />
+              ))}
+
+              {dayItems.map((item) => (
+                <div key={item.id} className="relative">
+                  {/* item dot on the spine */}
+                  <span
+                    aria-hidden
+                    className={`absolute -left-[26px] top-[18px] h-2.5 w-2.5 rounded-full ring-2 ring-slate-50 ${TYPE_DOT[item.type]}`}
+                  />
+                  <ItemCard
+                    item={item}
+                    travelers={travelers}
+                    onDelete={() => onDeleteItem(item)}
+                    onUpdate={
+                      onUpdateItem
+                        ? (body) => onUpdateItem(item, body)
+                        : undefined
+                    }
+                    readOnly={readOnly}
+                  />
+                </div>
+              ))}
+
+              {dayItems.length === 0 &&
+                continuing.length === 0 &&
+                endsToday.length === 0 &&
+                !noteFor(date) && (
+                  <p className="text-xs text-slate-400">No items.</p>
+                )}
+            </div>
           </section>
         );
       })}
@@ -195,4 +225,3 @@ function SpanBanner({ span, label }: { span: Span; label: string }) {
     </div>
   );
 }
-

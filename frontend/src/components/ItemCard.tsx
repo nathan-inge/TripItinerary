@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { CreateItem, Item, ItemType, Traveler } from '../api/types';
 import ItemLinks from './ItemLinks';
 import AddItemForm from './AddItemForm';
+import { TravelerAvatarStack } from './TravelerAvatar';
 
 interface Props {
   item: Item;
@@ -18,11 +19,20 @@ const TYPE_LABEL: Record<ItemType, string> = {
   activity: '🎫',
 };
 
-const TYPE_COLOR: Record<ItemType, string> = {
-  flight: 'bg-sky-50 text-sky-700 border-sky-200',
-  lodging: 'bg-amber-50 text-amber-800 border-amber-200',
-  transport: 'bg-violet-50 text-violet-700 border-violet-200',
-  activity: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+// Tailwind needs literal classnames; keep these as static strings so JIT
+// doesn't drop them.
+const TYPE_RAIL: Record<ItemType, string> = {
+  flight: 'border-l-sky-500',
+  lodging: 'border-l-amber-500',
+  transport: 'border-l-violet-500',
+  activity: 'border-l-emerald-500',
+};
+
+const TYPE_BADGE: Record<ItemType, string> = {
+  flight: 'bg-sky-100 text-sky-700',
+  lodging: 'bg-amber-100 text-amber-800',
+  transport: 'bg-violet-100 text-violet-700',
+  activity: 'bg-emerald-100 text-emerald-700',
 };
 
 function formatTime(iso: string | null): string {
@@ -87,7 +97,7 @@ export default function ItemCard({
 
   return (
     <article
-      className={`rounded-xl border bg-white p-3 shadow-sm ${TYPE_COLOR[item.type]} cursor-pointer hover:shadow-md`}
+      className={`rounded-xl border border-slate-200 border-l-4 bg-white p-3 shadow-sm transition-shadow ${TYPE_RAIL[item.type]} cursor-pointer hover:shadow-md`}
       role="button"
       tabIndex={0}
       aria-expanded={expanded}
@@ -102,17 +112,22 @@ export default function ItemCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-base" aria-hidden>
+            <span
+              className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sm ${TYPE_BADGE[item.type]}`}
+              aria-hidden
+            >
               {TYPE_LABEL[item.type]}
             </span>
-            <h3 className="truncate text-base font-semibold">{item.title}</h3>
+            <h3 className="truncate text-base font-semibold text-slate-900">
+              {item.title}
+            </h3>
           </div>
-          <p className="mt-0.5 text-xs tabular-nums text-slate-600">
+          <p className="mt-1 text-xs tabular-nums text-slate-600">
             {formatTime(item.start_at)}
             {item.end_at && <> – {formatTime(item.end_at)}</>}
             {item.location && (
               <>
-                <span className="ml-2 text-slate-500">·</span>{' '}
+                <span className="ml-2 text-slate-400">·</span>{' '}
                 <a
                   href={mapsUrl(item.location)}
                   target="_blank"
@@ -126,9 +141,9 @@ export default function ItemCard({
             )}
           </p>
           {travelerNames.length > 0 && (
-            <p className="mt-1 text-xs text-slate-600">
-              {travelerNames.join(', ')}
-            </p>
+            <div className="mt-1.5">
+              <TravelerAvatarStack names={travelerNames} />
+            </div>
           )}
           {expanded && (
             <>
