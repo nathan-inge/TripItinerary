@@ -9,6 +9,10 @@ pub enum ParseBackend {
     Ollama,
     /// No automated parsing; users edit items manually after pasting/forwarding.
     None,
+    /// Skip the LLM call but log the raw input, the post-redaction body, and
+    /// the conf-substitution map. Useful for verifying the redaction layer
+    /// without spending tokens or risking a leak during testing.
+    DryRun,
 }
 
 #[derive(Debug, Clone)]
@@ -67,9 +71,11 @@ impl Config {
             Some("anthropic") | Some("claude") => ParseBackend::Anthropic,
             Some("ollama") | Some("local") => ParseBackend::Ollama,
             Some("none") | Some("off") => ParseBackend::None,
+            Some("dry-run") | Some("dry_run") | Some("dryrun") => ParseBackend::DryRun,
             Some(other) => {
                 return Err(anyhow!(
-                    "TRIPIT_PARSE_BACKEND={other:?} unrecognized; use anthropic|ollama|none"
+                    "TRIPIT_PARSE_BACKEND={other:?} unrecognized; \
+                     use anthropic|ollama|none|dry-run"
                 ));
             }
             None => {
@@ -111,6 +117,12 @@ impl Config {
             ParseBackend::None => {
                 tracing::warn!(
                     "parse backend = none — paste/forward will not auto-extract fields."
+                );
+            }
+            ParseBackend::DryRun => {
+                tracing::warn!(
+                    "parse backend = DRY RUN — redactor runs, LLM is NOT called, \
+                     input + redacted body + conf map are logged. Do not use in prod."
                 );
             }
         }

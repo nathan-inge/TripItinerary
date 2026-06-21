@@ -13,6 +13,8 @@ use crate::models::{
     CreateItem, Item, ItemPreview, ItemSource, ItemType, Link, ParseStatus,
     ParseTextRequest, ParseTextResponse, UpdateItem,
 };
+use crate::config::ParseBackend;
+use crate::parse::dry_run::log_dry_run;
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::{lookup_conf_placeholder, redact_for_remote};
 use crate::routes::trips::require_trip_access;
@@ -96,18 +98,28 @@ pub async fn parse_text(
         ));
     }
 
-    let parser = state.parser.as_ref().ok_or_else(|| {
-        AppError::BadRequest(
-            "no parse backend configured (set TRIPIT_PARSE_BACKEND and credentials)".into(),
-        )
-    })?;
-
     // Redact PII + conf #s + traveler names before the text leaves the host.
     // raw_source kept in the response is the original; only the prompt going
     // to the LLM is the redacted text.
     let names = traveler_names_for(&state.pool, &trip_id).await?;
     let names_ref: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     let redacted = redact_for_remote(raw_text, &names_ref);
+
+    // Dry-run short-circuit: log what would have been sent and bail. Skipped
+    // before checking for a parser since dry-run intentionally has none.
+    if matches!(state.cfg.parse_backend, ParseBackend::DryRun) {
+        log_dry_run("items/parse", raw_text, &redacted);
+        return Err(AppError::BadRequest(
+            "dry-run mode: parse not executed; see server logs for redaction details"
+                .into(),
+        ));
+    }
+
+    let parser = state.parser.as_ref().ok_or_else(|| {
+        AppError::BadRequest(
+            "no parse backend configured (set TRIPIT_PARSE_BACKEND and credentials)".into(),
+        )
+    })?;
 
     let est = estimate_tokens(&redacted.text);
     state

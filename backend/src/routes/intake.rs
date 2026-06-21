@@ -28,6 +28,8 @@ use uuid::Uuid;
 
 use crate::error::AppResult;
 use crate::models::{ItemSource, ParseStatus};
+use crate::config::ParseBackend;
+use crate::parse::dry_run::log_dry_run;
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::redact_for_remote;
 use crate::routes::items::{restore_conf_no, traveler_names_for};
@@ -201,11 +203,6 @@ async fn run_parse_and_insert(
     sender: String,
     prompt_text: String,
 ) {
-    let parser = match state.parser.as_ref() {
-        Some(p) => p,
-        None => return, // already logged in caller
-    };
-
     // Redact before the prompt leaves the host. The trip's traveler list is
     // already on record (we used it on the allow-list check); use those names.
     let names = match traveler_names_for(&state.pool, &trip_id).await {
@@ -217,6 +214,27 @@ async fn run_parse_and_insert(
     };
     let names_ref: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     let redacted = redact_for_remote(&prompt_text, &names_ref);
+
+    // Dry-run: log what would have gone to the LLM and stop. No item is
+    // inserted; the email is acknowledged silently like other dropped cases.
+    if matches!(state.cfg.parse_backend, ParseBackend::DryRun) {
+        log_dry_run(
+            &format!("intake/email trip={trip_name} sender={sender}"),
+            &prompt_text,
+            &redacted,
+        );
+        tracing::info!(
+            trip = %trip_name,
+            sender = %sender,
+            "intake/email dry-run — no item created"
+        );
+        return;
+    }
+
+    let parser = match state.parser.as_ref() {
+        Some(p) => p,
+        None => return, // already logged in caller
+    };
 
     let est = estimate_tokens(&redacted.text);
     if let Err(e) = state

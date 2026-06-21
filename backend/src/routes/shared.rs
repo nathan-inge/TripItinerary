@@ -18,6 +18,8 @@ use crate::models::{
     CreateItem, DayNote, Item, ItemPreview, ParseTextRequest, ParseTextResponse, ShareScope,
     SharedTripDetail, Traveler, Trip, TripDetail, UpdateItem, UpdateTrip, UpsertDayNote,
 };
+use crate::config::ParseBackend;
+use crate::parse::dry_run::log_dry_run;
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::redact_for_remote;
 use crate::routes::items::{restore_conf_no, traveler_names_for};
@@ -314,13 +316,20 @@ async fn parse_text(
     if raw_text.len() > 50_000 {
         return Err(AppError::BadRequest("raw_text exceeds 50 KB limit".into()));
     }
-    let parser = state.parser.as_ref().ok_or_else(|| {
-        AppError::BadRequest("no parse backend configured".into())
-    })?;
-
     let names = traveler_names_for(&state.pool, &access.trip_id).await?;
     let names_ref: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     let redacted = redact_for_remote(raw_text, &names_ref);
+
+    if matches!(state.cfg.parse_backend, ParseBackend::DryRun) {
+        log_dry_run("share/items/parse", raw_text, &redacted);
+        return Err(AppError::BadRequest(
+            "dry-run mode: parse not executed; see server logs".into(),
+        ));
+    }
+
+    let parser = state.parser.as_ref().ok_or_else(|| {
+        AppError::BadRequest("no parse backend configured".into())
+    })?;
 
     let est = estimate_tokens(&redacted.text);
     state

@@ -55,7 +55,9 @@ async fn main() -> Result<()> {
         config::ParseBackend::Ollama => Some(parse::Parser::Ollama(
             parse::ollama::OllamaClient::new(cfg.ollama_url.clone(), cfg.ollama_model.clone()),
         )),
-        config::ParseBackend::None => None,
+        // DryRun and None both leave state.parser=None; route handlers check
+        // ParseBackend::DryRun explicitly before complaining about no parser.
+        config::ParseBackend::None | config::ParseBackend::DryRun => None,
     };
 
     let state = AppState {

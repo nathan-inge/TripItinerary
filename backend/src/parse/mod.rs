@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod dry_run;
 pub mod ollama;
 pub mod parser;
 pub mod prompt;
