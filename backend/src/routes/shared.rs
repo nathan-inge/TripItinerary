@@ -95,10 +95,7 @@ async fn get_trip(
     State(state): State<AppState>,
     axum::extract::Extension(access): axum::extract::Extension<ScopedAccess>,
 ) -> AppResult<Json<SharedTripDetail>> {
-    let trip: Trip = sqlx::query_as("SELECT * FROM trips WHERE id = ?1")
-        .bind(&access.trip_id)
-        .fetch_one(&state.pool)
-        .await?;
+    let trip = crate::routes::trips::fetch_trip_unscoped(&state.pool, &access.trip_id).await?;
     let travelers: Vec<Traveler> =
         travelers_routes::list_for_trip(&state.pool, &access.trip_id).await?;
     let items: Vec<Item> =
@@ -127,46 +124,8 @@ async fn update_trip(
     Json(payload): Json<UpdateTrip>,
 ) -> AppResult<Json<Trip>> {
     require_edit(&access)?;
-    let mut trip: Trip = sqlx::query_as("SELECT * FROM trips WHERE id = ?1")
-        .bind(&access.trip_id)
-        .fetch_one(&state.pool)
-        .await?;
-    if let Some(name) = payload.name {
-        if name.trim().is_empty() {
-            return Err(AppError::BadRequest("name cannot be empty".into()));
-        }
-        trip.name = name;
-    }
-    if let Some(d) = payload.destination {
-        trip.destination = d;
-    }
-    if let Some(sd) = payload.start_date {
-        trip.start_date = sd;
-    }
-    if let Some(ed) = payload.end_date {
-        trip.end_date = ed;
-    }
-    if trip.start_date > trip.end_date {
-        return Err(AppError::BadRequest("start_date must be <= end_date".into()));
-    }
-    if let Some(notes) = payload.notes_md {
-        trip.notes_md = notes;
-    }
-    trip.updated_at = Utc::now().to_rfc3339();
-
-    sqlx::query(
-        "UPDATE trips SET name=?1, destination=?2, start_date=?3, end_date=?4, notes_md=?5, updated_at=?6
-         WHERE id=?7",
-    )
-    .bind(&trip.name)
-    .bind(&trip.destination)
-    .bind(&trip.start_date)
-    .bind(&trip.end_date)
-    .bind(&trip.notes_md)
-    .bind(&trip.updated_at)
-    .bind(&trip.id)
-    .execute(&state.pool)
-    .await?;
+    crate::routes::trips::apply_update(&state.pool, &access.trip_id, None, payload).await?;
+    let trip = crate::routes::trips::fetch_trip_unscoped(&state.pool, &access.trip_id).await?;
     Ok(Json(trip))
 }
 

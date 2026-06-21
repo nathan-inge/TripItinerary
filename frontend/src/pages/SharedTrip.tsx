@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { shareApi } from '../api/client';
-import type { CreateItem, Item, SharedTripDetail } from '../api/types';
+import type { CreateItem, Item, SharedTripDetail, TodoItem } from '../api/types';
 import Timeline from '../components/Timeline';
 import AddItemForm from '../components/AddItemForm';
 import EmailIntakeHint from '../components/EmailIntakeHint';
 import PasteParseForm from '../components/PasteParseForm';
+import TripTodoList from '../components/TripTodoList';
 
 type AddMode = 'closed' | 'manual' | 'paste';
 
@@ -60,6 +61,12 @@ export default function SharedTrip() {
     load();
   };
 
+  const handleTodosChange = async (todos: TodoItem[]) => {
+    if (!client) return;
+    await client.updateTrip({ todos });
+    load();
+  };
+
   if (!data) {
     return error ? (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -76,7 +83,7 @@ export default function SharedTrip() {
 
   return (
     <div className="space-y-4">
-      <div>
+      <div className="space-y-2">
         <h1 className="text-2xl font-bold">{data.name}</h1>
         <p className="text-sm text-slate-600">
           {data.start_date} → {data.end_date}
@@ -85,7 +92,38 @@ export default function SharedTrip() {
             {data.share_scope === 'edit' ? 'editor' : 'view only'}
           </span>
         </p>
+        {(data.photos_url || data.maps_url) && (
+          <div className="flex flex-wrap gap-2">
+            {data.photos_url && (
+              <a
+                href={data.photos_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800 hover:bg-teal-100"
+              >
+                <span aria-hidden>📷</span>Photos
+              </a>
+            )}
+            {data.maps_url && (
+              <a
+                href={data.maps_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800 hover:bg-teal-100"
+              >
+                <span aria-hidden>🗺</span>Map
+              </a>
+            )}
+          </div>
+        )}
       </div>
+
+      <TripTodoList
+        todos={data.todos}
+        onChange={handleTodosChange}
+        readOnly={!canEdit}
+      />
+
 
       {canEdit && token && (
         <>

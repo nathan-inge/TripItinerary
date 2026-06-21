@@ -11,6 +11,7 @@ import type {
   Traveler,
   Trip,
   TripDetail,
+  UpdateTrip,
 } from './types';
 
 async function req<T>(
@@ -35,7 +36,7 @@ export const api = {
   getTrip: (id: string) => req<TripDetail>(`/trips/${id}`),
   createTrip: (body: CreateTrip) =>
     req<Trip>('/trips', { method: 'POST', body: JSON.stringify(body) }),
-  updateTrip: (id: string, body: Partial<CreateTrip>) =>
+  updateTrip: (id: string, body: UpdateTrip) =>
     req<Trip>(`/trips/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteTrip: (id: string) =>
     req<void>(`/trips/${id}`, { method: 'DELETE' }, false),
@@ -97,6 +98,11 @@ export function shareApi(token: string) {
   const base = `/share/${encodeURIComponent(token)}`;
   return {
     getTrip: () => req<SharedTripDetail>(`${base}/trip`),
+    updateTrip: (body: UpdateTrip) =>
+      req<Trip>(`${base}/trip`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
     createItem: (body: CreateItem) =>
       req<Item>(`${base}/items`, {
         method: 'POST',

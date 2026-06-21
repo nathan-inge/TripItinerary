@@ -23,3 +23,70 @@
     @apply select-none;
   }
 }
+
+/* Rendered HTML from the day-note rich-text editor. */
+.day-note-prose {
+  @apply text-sm text-slate-700;
+}
+.day-note-prose p {
+  @apply mb-2;
+}
+.day-note-prose p:last-child {
+  @apply mb-0;
+}
+.day-note-prose strong {
+  @apply font-semibold text-slate-900;
+}
+.day-note-prose em {
+  @apply italic;
+}
+.day-note-prose s {
+  @apply line-through opacity-70;
+}
+.day-note-prose mark {
+  @apply rounded bg-yellow-200 px-0.5 text-slate-900;
+}
+.day-note-prose a {
+  @apply text-teal-700 underline underline-offset-2 hover:text-teal-800;
+}
+.day-note-prose h1 {
+  @apply mb-2 mt-2 text-lg font-semibold text-slate-900;
+}
+.day-note-prose h2 {
+  @apply mb-1.5 mt-2 text-base font-semibold text-slate-900;
+}
+.day-note-prose h3 {
+  @apply mb-1 mt-2 text-sm font-semibold text-slate-900;
+}
+.day-note-prose ul,
+.day-note-prose ol {
+  @apply mb-2 ml-5 space-y-0.5;
+}
+.day-note-prose ul {
+  @apply list-disc;
+}
+.day-note-prose ol {
+  @apply list-decimal;
+}
+.day-note-prose li ul,
+.day-note-prose li ol {
+  @apply mb-0 mt-0.5;
+}
+.day-note-prose code {
+  @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-xs;
+}
+.day-note-prose blockquote {
+  @apply my-2 border-l-2 border-slate-300 pl-3 italic text-slate-600;
+}
+
+/* TipTap ProseMirror editor surface */
+.day-note-prose.ProseMirror {
+  @apply min-h-[80px] rounded-lg border border-slate-300 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-600;
+}
+.day-note-prose.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: theme(colors.slate.400);
+  pointer-events: none;
+  height: 0;
+}

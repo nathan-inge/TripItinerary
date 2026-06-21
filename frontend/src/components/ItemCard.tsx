@@ -34,6 +34,10 @@ function formatTime(iso: string | null): string {
   return `${m[4]}:${m[5]}`;
 }
 
+function mapsUrl(location: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`;
+}
+
 export default function ItemCard({
   item,
   travelers,
@@ -42,6 +46,7 @@ export default function ItemCard({
   readOnly,
 }: Props) {
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (editing && onUpdate) {
     return (
@@ -73,22 +78,24 @@ export default function ItemCard({
     .filter(Boolean) as string[];
 
   const canEdit = !readOnly && !!onUpdate;
-  const openEdit = () => {
-    if (canEdit) setEditing(true);
-  };
+  const toggle = () => setExpanded((v) => !v);
+  const hasMoreDetails =
+    !!item.notes ||
+    item.links.length > 0 ||
+    !!item.confirmation_no ||
+    Object.keys(item.details).length > 0;
 
   return (
     <article
-      className={`rounded-xl border bg-white p-3 shadow-sm ${TYPE_COLOR[item.type]} ${
-        canEdit ? 'cursor-pointer hover:shadow-md' : ''
-      }`}
-      role={canEdit ? 'button' : undefined}
-      tabIndex={canEdit ? 0 : undefined}
-      onClick={openEdit}
+      className={`rounded-xl border bg-white p-3 shadow-sm ${TYPE_COLOR[item.type]} cursor-pointer hover:shadow-md`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      onClick={toggle}
       onKeyDown={(e) => {
-        if (canEdit && (e.key === 'Enter' || e.key === ' ')) {
+        if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          openEdit();
+          toggle();
         }
       }}
     >
@@ -104,7 +111,18 @@ export default function ItemCard({
             {formatTime(item.start_at)}
             {item.end_at && <> – {formatTime(item.end_at)}</>}
             {item.location && (
-              <span className="ml-2 text-slate-700">· {item.location}</span>
+              <>
+                <span className="ml-2 text-slate-500">·</span>{' '}
+                <a
+                  href={mapsUrl(item.location)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-slate-700 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500"
+                >
+                  {item.location}
+                </a>
+              </>
             )}
           </p>
           {travelerNames.length > 0 && (
@@ -112,28 +130,56 @@ export default function ItemCard({
               {travelerNames.join(', ')}
             </p>
           )}
-          <div onClick={(e) => e.stopPropagation()}>
-            <ItemLinks links={item.links} confirmationNo={item.confirmation_no} />
-          </div>
-          {item.notes && (
-            <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
-              {item.notes}
-            </p>
+          {expanded && (
+            <>
+              <div onClick={(e) => e.stopPropagation()}>
+                <ItemLinks
+                  links={item.links}
+                  confirmationNo={item.confirmation_no}
+                />
+              </div>
+              {item.notes && (
+                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                  {item.notes}
+                </p>
+              )}
+              {canEdit && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditing(true);
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete();
+                    }}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
-        {!readOnly && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="text-xs text-slate-400 hover:text-red-700"
-            aria-label="Delete item"
-            title="Delete"
-          >
-            ✕
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1 text-slate-400">
+          {hasMoreDetails && (
+            <span
+              aria-hidden
+              className={`select-none text-xs transition-transform ${expanded ? 'rotate-180' : ''}`}
+            >
+              ▾
+            </span>
+          )}
+        </div>
       </div>
     </article>
   );

@@ -178,7 +178,19 @@ function SpanBanner({ span, label }: { span: Span; label: string }) {
     >
       <span aria-hidden>{style.icon} </span>
       <span className="font-medium">{item.title}</span>
-      {item.location && <span className="opacity-80"> · {item.location}</span>}
+      {item.location && (
+        <>
+          <span className="opacity-80"> · </span>
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.location)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-current/30 underline-offset-2 opacity-80 hover:decoration-current/70"
+          >
+            {item.location}
+          </a>
+        </>
+      )}
       <span className="ml-2 text-xs opacity-70">{label}</span>
     </div>
   );

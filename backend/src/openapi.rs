@@ -22,6 +22,7 @@ use utoipa::OpenApi;
         crate::models::TripDetail,
         crate::models::CreateTrip,
         crate::models::UpdateTrip,
+        crate::models::TodoItem,
         crate::models::Traveler,
         crate::models::CreateTraveler,
         crate::models::UpdateTraveler,

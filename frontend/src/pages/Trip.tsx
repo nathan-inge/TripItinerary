@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
-import type { CreateItem, Item, TripDetail } from '../api/types';
+import type { CreateItem, Item, TodoItem, TripDetail, UpdateTrip } from '../api/types';
 import Timeline from '../components/Timeline';
 import AddItemForm from '../components/AddItemForm';
 import EmailIntakeHint from '../components/EmailIntakeHint';
 import PasteParseForm from '../components/PasteParseForm';
+import TripHeader from '../components/TripHeader';
+import TripTodoList from '../components/TripTodoList';
 
 type AddMode = 'closed' | 'manual' | 'paste';
 
@@ -53,6 +55,16 @@ export default function TripPage() {
     load();
   };
 
+  const patchTrip = async (patch: UpdateTrip) => {
+    if (!id) return;
+    const next = await api.updateTrip(id, patch);
+    setData((prev) => (prev ? { ...prev, ...next } : prev));
+  };
+
+  const handleTodosChange = async (todos: TodoItem[]) => {
+    await patchTrip({ todos });
+  };
+
   if (!data) {
     return error ? (
       <p className="text-red-700">{error}</p>
@@ -64,15 +76,19 @@ export default function TripPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <Link to="/" className="text-sm text-teal-700 hover:underline">
             ← Trips
           </Link>
-          <h1 className="text-2xl font-bold">{data.name}</h1>
-          <p className="text-sm text-slate-600">
-            {data.start_date} → {data.end_date}
-            {data.destination && <> · {data.destination}</>}
-          </p>
+          <TripHeader
+            name={data.name}
+            startDate={data.start_date}
+            endDate={data.end_date}
+            destination={data.destination}
+            photosUrl={data.photos_url}
+            mapsUrl={data.maps_url}
+            onPatch={patchTrip}
+          />
         </div>
         <Link
           to={`/trips/${data.id}/manage`}
@@ -81,6 +97,8 @@ export default function TripPage() {
           Manage
         </Link>
       </div>
+
+      <TripTodoList todos={data.todos} onChange={handleTodosChange} />
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -142,4 +160,3 @@ export default function TripPage() {
     </div>
   );
 }
-

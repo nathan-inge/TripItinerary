@@ -2,6 +2,12 @@ export type ItemType = 'flight' | 'lodging' | 'transport' | 'activity';
 export type ItemSource = 'paste' | 'email' | 'manual';
 export type ParseStatus = 'parsed' | 'review' | 'manual';
 
+export interface TodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
 export interface Trip {
   id: string;
   owner_email: string;
@@ -10,6 +16,9 @@ export interface Trip {
   start_date: string;
   end_date: string;
   notes_md: string;
+  photos_url: string | null;
+  maps_url: string | null;
+  todos: TodoItem[];
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +81,17 @@ export interface CreateTrip {
   start_date: string;
   end_date: string;
   notes_md?: string;
+}
+
+export interface UpdateTrip {
+  name?: string;
+  destination?: string | null;
+  start_date?: string;
+  end_date?: string;
+  notes_md?: string;
+  photos_url?: string | null;
+  maps_url?: string | null;
+  todos?: TodoItem[];
 }
 
 export interface CreateItem {
