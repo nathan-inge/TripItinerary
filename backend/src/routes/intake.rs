@@ -29,6 +29,8 @@ use uuid::Uuid;
 use crate::error::AppResult;
 use crate::models::{ItemSource, ParseStatus};
 use crate::parse::prompt::estimate_tokens;
+use crate::parse::redact::redact_for_remote;
+use crate::routes::items::{restore_conf_no, traveler_names_for};
 use crate::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -204,7 +206,19 @@ async fn run_parse_and_insert(
         None => return, // already logged in caller
     };
 
-    let est = estimate_tokens(&prompt_text);
+    // Redact before the prompt leaves the host. The trip's traveler list is
+    // already on record (we used it on the allow-list check); use those names.
+    let names = match traveler_names_for(&state.pool, &trip_id).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!("intake/email failed to load travelers: {e}");
+            return;
+        }
+    };
+    let names_ref: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    let redacted = redact_for_remote(&prompt_text, &names_ref);
+
+    let est = estimate_tokens(&redacted.text);
     if let Err(e) = state
         .token_cap
         .check_and_reserve(est, state.cfg.daily_token_cap)
@@ -214,7 +228,7 @@ async fn run_parse_and_insert(
         return;
     }
 
-    let (parsed, used) = match parser.parse_item(&prompt_text).await {
+    let (parsed, used) = match parser.parse_item(&redacted.text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;
@@ -228,6 +242,8 @@ async fn run_parse_and_insert(
         }
     };
     state.token_cap.settle(est, used).await;
+
+    let confirmation_no = restore_conf_no(parsed.confirmation_no, &redacted.conf_map);
 
     let id = Uuid::now_v7().to_string();
     let now = Utc::now().to_rfc3339();
@@ -247,7 +263,7 @@ async fn run_parse_and_insert(
     .bind(&parsed.start_at)
     .bind(&parsed.end_at)
     .bind(&parsed.location)
-    .bind(&parsed.confirmation_no)
+    .bind(&confirmation_no)
     .bind(&parsed.notes)
     .bind(&details_json)
     .bind(&links_json)

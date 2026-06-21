@@ -6,7 +6,6 @@ use crate::models::ItemSource;
 use crate::parse::prompt::{
     parsed_item_from_value, record_item_schema, ParsedItem, SYSTEM_PROMPT,
 };
-use crate::parse::redact::redact;
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -27,11 +26,11 @@ impl ClaudeClient {
         }
     }
 
+    /// The caller is responsible for redacting `raw_text` before passing it
+    /// in. See `parse/redact.rs::redact_for_remote` — it returns a conf-#
+    /// substitution map the caller uses to restore real values after the
+    /// LLM response arrives.
     pub async fn parse_item(&self, raw_text: &str) -> Result<(ParsedItem, u64)> {
-        // Strip PII before crossing the network boundary. The local raw_source
-        // stored in the DB is unaffected.
-        let redacted = redact(raw_text);
-
         let tool = json!({
             "name": "record_item",
             "description": "Record a single structured itinerary item extracted from a confirmation.",
@@ -48,7 +47,7 @@ impl ClaudeClient {
             }],
             "tools": [tool],
             "tool_choice": { "type": "tool", "name": "record_item" },
-            "messages": [{ "role": "user", "content": redacted }],
+            "messages": [{ "role": "user", "content": raw_text }],
         });
 
         let resp = self

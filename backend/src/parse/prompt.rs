@@ -36,8 +36,14 @@ Rules:
   explanation to `notes_for_review` so a human can fix it before saving.
 - Keep `notes` for content meant for the traveler (gate, terminal, dress code, etc),
   not for your own caveats.
-- The source may contain `[REDACTED:CARD]`, `[REDACTED:EMAIL]`, etc. Treat these as
-  intentionally stripped — do not invent replacements.
+- The source may contain `[REDACTED:CARD]`, `[REDACTED:EMAIL]`, `[REDACTED:PHONE]`,
+  `[REDACTED:SSN]`, `[REDACTED:NAME]` — treat these as intentionally stripped, do
+  not invent replacements, and leave them in any field where they appear.
+- Booking references appear as placeholders like `[REDACTED:CONF_1]`,
+  `[REDACTED:CONF_2]`. When you emit `confirmation_no`, emit the placeholder verbatim
+  (e.g. `"confirmation_no": "[REDACTED:CONF_1]"`); the server will substitute the
+  real value back from a local map. If no `[REDACTED:CONF_*]` placeholder appears in
+  the source for this item, set `confirmation_no` to null rather than guessing.
 "#;
 
 /// The JSON Schema both backends agree on. Returned as a serde_json::Value so

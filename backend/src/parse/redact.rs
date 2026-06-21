@@ -1,27 +1,58 @@
-//! PII redaction for outbound LLM bodies.
+//! Redaction of high-risk fields before LLM bodies leave the host.
 //!
-//! The goal is "what leaves the server has the high-risk PII removed" — not
-//! "what's stored locally is anonymized". Run this only on the text that's
-//! about to be sent to an external service (Anthropic API). Local raw_source
-//! storage keeps the original.
-//!
-//! Targets, in confidence order:
+//! Always redacted (no substitute-back):
 //!   1. Payment-card numbers (Luhn-validated to suppress false positives on
 //!      flight numbers and PNRs).
-//!   2. SSN-shaped strings (US format only — rare in confirmations but worth
-//!      catching).
+//!   2. SSN-shaped strings (US format).
 //!   3. Phone numbers (US/international).
-//!   4. Naked email addresses that aren't part of a URL (URLs may carry the
-//!      manage-booking link; the parser uses them).
+//!   4. Naked email addresses that aren't part of a URL.
+//!   5. Traveler names from the trip's allow-list (case-insensitive,
+//!      word-boundary match).
+//!
+//! Redacted *with* substitute-back via a returned map:
+//!   6. Booking confirmation numbers detected by an explicit label
+//!      (Booking / Confirmation / Reservation / Reference / Record locator /
+//!      PNR / PIN, with optional code|number suffix). Replaced with a stable
+//!      placeholder `[REDACTED:CONF_n]`; the LLM emits the placeholder as
+//!      `confirmation_no` and we map back the real value locally after the
+//!      response arrives. The LLM never sees the real value.
 //!
 //! Deliberately NOT redacted (the parser needs them):
-//!   - Traveler names, addresses, dates, flight numbers, conf #s, loyalty IDs.
+//!   - Trip name, item title, dates, locations, flight numbers, loyalty IDs
+//!     (loyalty IDs aren't in our redact list because they're typically not
+//!     enough on their own to manage a booking, unlike the booking ref).
 
 use regex::Regex;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// Redact PII from `text`. Idempotent: redaction tokens contain `[REDACTED:`
-/// which doesn't match any pattern, so running twice is a no-op.
+/// Result of `redact_for_remote`.
+pub struct RedactOutput {
+    /// Body to send to the LLM. PII stripped; conf #s and names placeholdered.
+    pub text: String,
+    /// Map of placeholder → real conf #. Used to restore `confirmation_no`
+    /// on the response side. Caller should drop this when done.
+    pub conf_map: HashMap<String, String>,
+}
+
+/// Full pre-LLM redaction. Applies every pass in §1–6 of the module docs.
+pub fn redact_for_remote(text: &str, traveler_names: &[&str]) -> RedactOutput {
+    let mut out = text.to_string();
+    out = redact_emails_outside_urls(&out);
+    out = redact_card_numbers(&out);
+    out = redact_ssns(&out);
+    out = redact_phones(&out);
+    out = redact_names(&out, traveler_names);
+    let (out, conf_map) = redact_booking_refs(&out);
+    RedactOutput {
+        text: out,
+        conf_map,
+    }
+}
+
+/// Backwards-compat wrapper for callers that don't have a trip context (none
+/// in production after this commit; tests may use it).
+#[cfg(test)]
 pub fn redact(text: &str) -> String {
     let mut out = text.to_string();
     out = redact_emails_outside_urls(&out);
@@ -152,6 +183,111 @@ fn redact_emails_outside_urls(text: &str) -> String {
     out
 }
 
+// ---------- traveler names ----------
+
+fn redact_names(text: &str, names: &[&str]) -> String {
+    let mut out = text.to_string();
+    for name in names {
+        let trimmed = name.trim();
+        // Skip short names — too risky for false positives ("Al", "Mo").
+        if trimmed.len() < 3 {
+            continue;
+        }
+        let escaped = regex::escape(trimmed);
+        // Whole-word, case-insensitive. The first `(?i:)` scope is just the
+        // label-style group from booking_ref but reused — works for plain
+        // strings too.
+        let pattern = format!(r"(?i)\b{}\b", escaped);
+        if let Ok(re) = Regex::new(&pattern) {
+            out = re.replace_all(&out, "[REDACTED:NAME]").into_owned();
+        }
+    }
+    out
+}
+
+// ---------- booking confirmation numbers ----------
+
+fn booking_ref_regex() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        // Label is case-insensitive via `(?i:...)`; value stays case-sensitive
+        // so the heuristic in `looks_like_conf` can reject lowercase words.
+        // `[\s:#]*` between label and value matches across newlines (`\s`
+        // includes `\n`), so multi-line shapes like
+        //     Booking code
+        //         X57BBZ
+        // get caught.
+        Regex::new(concat!(
+            r"(?i:\b(?:",
+            r"booking(?:\s+code|\s+number|\s+reference|\s+ref(?:\.|\b)|\s+no\.?)?",
+            r"|confirmation(?:\s+code|\s+number|\s+no\.?)?",
+            r"|reservation(?:\s+code|\s+number|\s+no\.?)?",
+            r"|reference(?:\s+number|\s+no\.?)?",
+            r"|record\s*locator",
+            r"|locator",
+            r"|pnr",
+            r"|conf\.?",
+            r"|pin",
+            r")\b)",
+            r"[\s:#]*",
+            r"(?-i:([A-Z0-9][A-Z0-9-]{3,19}))",
+        ))
+        .unwrap()
+    })
+}
+
+/// True if `s` looks like a booking ref rather than an English word that
+/// happened to follow a label. Guard against e.g. "Booking processed by..."
+/// where "processed" would otherwise match. Codes are uppercase/digits;
+/// English words have lowercase.
+fn looks_like_conf(s: &str) -> bool {
+    if s.chars().any(|c| c.is_ascii_lowercase()) {
+        return false;
+    }
+    let has_digit = s.chars().any(|c| c.is_ascii_digit());
+    let upper_count = s.chars().filter(|c| c.is_ascii_uppercase()).count();
+    has_digit || upper_count >= 5
+}
+
+fn redact_booking_refs(text: &str) -> (String, HashMap<String, String>) {
+    let mut map: HashMap<String, String> = HashMap::new();
+    let mut value_to_placeholder: HashMap<String, String> = HashMap::new();
+    let mut counter = 0;
+
+    for caps in booking_ref_regex().captures_iter(text) {
+        let value = caps.get(1).unwrap().as_str();
+        if !looks_like_conf(value) {
+            continue;
+        }
+        if value_to_placeholder.contains_key(value) {
+            continue;
+        }
+        counter += 1;
+        let placeholder = format!("[REDACTED:CONF_{}]", counter);
+        value_to_placeholder.insert(value.to_string(), placeholder.clone());
+        map.insert(placeholder, value.to_string());
+    }
+
+    let mut redacted = text.to_string();
+    // Apply globally so the same value at multiple sites (header, body,
+    // URL params, footer) all become the same placeholder.
+    for (value, placeholder) in &value_to_placeholder {
+        redacted = redacted.replace(value, placeholder);
+    }
+
+    (redacted, map)
+}
+
+/// Look up a real conf value for a placeholder the LLM emitted.
+/// Returns None if `value` isn't a known placeholder — caller decides whether
+/// to keep the raw value (lenient) or drop it (strict).
+pub fn lookup_conf_placeholder<'a>(
+    value: &str,
+    map: &'a HashMap<String, String>,
+) -> Option<&'a String> {
+    map.get(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +370,143 @@ mod tests {
         let once = redact("Card 4111 1111 1111 1111, phone (415) 555-1234.");
         let twice = redact(&once);
         assert_eq!(once, twice);
+    }
+
+    // ---------- booking refs ----------
+
+    #[test]
+    fn redacts_labeled_conf_inline() {
+        let (out, map) = redact_booking_refs("Confirmation: 6698495724 thanks.");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+        assert!(!out.contains("6698495724"));
+        assert_eq!(map.get("[REDACTED:CONF_1]"), Some(&"6698495724".to_string()));
+    }
+
+    #[test]
+    fn redacts_booking_no_colon() {
+        let (out, _) = redact_booking_refs("Booking 9734737915\nThanks");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+    }
+
+    #[test]
+    fn redacts_booking_code_multiline_value() {
+        // Label on one line, value on the next non-empty line.
+        let src = "Booking code    \n    \n      X57BBZ\nNext line";
+        let (out, map) = redact_booking_refs(src);
+        assert!(
+            out.contains("[REDACTED:CONF_1]"),
+            "expected placeholder, got: {out:?}"
+        );
+        assert!(!out.contains("X57BBZ"));
+        assert_eq!(map.get("[REDACTED:CONF_1]"), Some(&"X57BBZ".to_string()));
+    }
+
+    #[test]
+    fn redacts_pin() {
+        let (out, _) = redact_booking_refs("PIN: 6214 (Confidential)");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+        assert!(out.contains("(Confidential)")); // parenthetical preserved
+    }
+
+    #[test]
+    fn redacts_confirmation_code() {
+        let (out, _) = redact_booking_refs("Confirmation code: HMF2JANSPW\nDetails");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+        assert!(!out.contains("HMF2JANSPW"));
+    }
+
+    #[test]
+    fn global_substitute_when_value_appears_twice() {
+        // Value appears once labeled and once unlabeled (footer / URL).
+        let src = "Booking ABC123. Manage: https://x.com/?ref=ABC123";
+        let (out, _) = redact_booking_refs(src);
+        // Both occurrences should be the same placeholder.
+        let count = out.matches("[REDACTED:CONF_1]").count();
+        assert_eq!(count, 2, "got: {out:?}");
+        assert!(!out.contains("ABC123"));
+    }
+
+    #[test]
+    fn skips_english_word_after_label() {
+        // "Booking processed by..." — model would happily extract "processed"
+        // if we didn't gate on the looks_like_conf heuristic.
+        let (out, map) = redact_booking_refs("Booking processed by Sixt staff.");
+        assert!(map.is_empty(), "got map: {map:?}");
+        assert_eq!(out, "Booking processed by Sixt staff.");
+    }
+
+    #[test]
+    fn skips_short_lowercase_value() {
+        let (_out, map) = redact_booking_refs("Confirmation: yes");
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn allows_short_all_digit_pin() {
+        let (out, _) = redact_booking_refs("PIN: 6214 (Confidential)");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+    }
+
+    #[test]
+    fn distinct_placeholders_for_distinct_values() {
+        let (out, map) = redact_booking_refs("Booking ABC123. Confirmation: 999888777.");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+        assert!(out.contains("[REDACTED:CONF_2]"));
+        assert_eq!(map.len(), 2);
+    }
+
+    // ---------- names ----------
+
+    #[test]
+    fn redacts_traveler_name_word_boundary() {
+        let out = redact_names("Dear Nathan, your booking is confirmed.", &["Nathan"]);
+        assert!(out.contains("[REDACTED:NAME]"));
+        assert!(!out.contains("Nathan"));
+    }
+
+    #[test]
+    fn redacts_name_case_insensitive() {
+        let out = redact_names("welcome NATHAN inge", &["Nathan Inge"]);
+        // "NATHAN inge" as a whole-word match against "Nathan Inge"
+        assert!(out.contains("[REDACTED:NAME]"));
+    }
+
+    #[test]
+    fn skips_substring_within_other_word() {
+        // "Nat" shouldn't redact "Nathan" via partial match.
+        let out = redact_names("Nathan booked it", &["Nat"]);
+        // Length < 3 → skipped entirely.
+        assert!(out.contains("Nathan"));
+        // But if we redact on "Nate" (>=3 chars), should NOT touch "Nathan".
+        let out2 = redact_names("Nathan booked it", &["Nate"]);
+        assert!(out2.contains("Nathan"));
+    }
+
+    // ---------- end-to-end ----------
+
+    #[test]
+    fn redact_for_remote_combines_all() {
+        let src = "Dear Nathan Inge,\n\nBooking 9734737915 confirmed. \
+                   Charge to card 4111 1111 1111 1111. Reach us at help@sixt.com.";
+        let r = redact_for_remote(src, &["Nathan Inge"]);
+        assert!(r.text.contains("[REDACTED:NAME]"));
+        assert!(r.text.contains("[REDACTED:CARD]"));
+        assert!(r.text.contains("[REDACTED:EMAIL]"));
+        assert!(r.text.contains("[REDACTED:CONF_1]"));
+        assert!(!r.text.contains("Nathan"));
+        assert!(!r.text.contains("9734737915"));
+        assert!(!r.text.contains("4111"));
+        assert!(!r.text.contains("help@sixt.com"));
+        assert_eq!(r.conf_map.get("[REDACTED:CONF_1]"), Some(&"9734737915".to_string()));
+    }
+
+    #[test]
+    fn placeholder_lookup() {
+        let r = redact_for_remote("Booking ABC123", &[]);
+        assert_eq!(
+            lookup_conf_placeholder("[REDACTED:CONF_1]", &r.conf_map),
+            Some(&"ABC123".to_string())
+        );
+        assert!(lookup_conf_placeholder("[REDACTED:CONF_999]", &r.conf_map).is_none());
     }
 }

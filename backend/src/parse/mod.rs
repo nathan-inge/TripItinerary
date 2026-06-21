@@ -6,5 +6,4 @@ pub mod redact;
 pub mod token_cap;
 
 pub use parser::Parser;
-pub use redact::redact;
 pub use token_cap::TokenCap;

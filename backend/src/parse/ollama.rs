@@ -12,7 +12,6 @@ use crate::models::ItemSource;
 use crate::parse::prompt::{
     parsed_item_from_value, record_item_schema, ParsedItem, SYSTEM_PROMPT,
 };
-use crate::parse::redact::redact;
 
 #[derive(Clone)]
 pub struct OllamaClient {
@@ -32,18 +31,16 @@ impl OllamaClient {
         }
     }
 
+    /// The caller is responsible for redacting `raw_text` before passing it
+    /// in (consistent with the Claude backend).
     pub async fn parse_item(&self, raw_text: &str) -> Result<(ParsedItem, u64)> {
-        // Redact even though the request stays on-host — keeps `details_json`
-        // and any downstream backups from carrying card #s and the like.
-        let redacted = redact(raw_text);
-
         let body = json!({
             "model": self.model,
             "stream": false,
             "format": record_item_schema(),
             "messages": [
                 { "role": "system", "content": SYSTEM_PROMPT },
-                { "role": "user",   "content": redacted },
+                { "role": "user",   "content": raw_text },
             ],
             // Lower temperature for extraction; the schema constrains shape
             // but the model still picks word forms.

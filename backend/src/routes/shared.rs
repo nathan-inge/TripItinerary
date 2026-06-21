@@ -19,6 +19,8 @@ use crate::models::{
     SharedTripDetail, Traveler, Trip, TripDetail, UpdateItem, UpdateTrip, UpsertDayNote,
 };
 use crate::parse::prompt::estimate_tokens;
+use crate::parse::redact::redact_for_remote;
+use crate::routes::items::{restore_conf_no, traveler_names_for};
 use crate::routes::items as items_routes;
 use crate::routes::travelers as travelers_routes;
 use crate::AppState;
@@ -315,13 +317,18 @@ async fn parse_text(
     let parser = state.parser.as_ref().ok_or_else(|| {
         AppError::BadRequest("no parse backend configured".into())
     })?;
-    let est = estimate_tokens(raw_text);
+
+    let names = traveler_names_for(&state.pool, &access.trip_id).await?;
+    let names_ref: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    let redacted = redact_for_remote(raw_text, &names_ref);
+
+    let est = estimate_tokens(&redacted.text);
     state
         .token_cap
         .check_and_reserve(est, state.cfg.daily_token_cap)
         .await
         .map_err(AppError::BadRequest)?;
-    let (parsed, actual) = match parser.parse_item(raw_text).await {
+    let (parsed, actual) = match parser.parse_item(&redacted.text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;
@@ -329,13 +336,14 @@ async fn parse_text(
         }
     };
     state.token_cap.settle(est, actual).await;
+    let confirmation_no = restore_conf_no(parsed.confirmation_no, &redacted.conf_map);
     let preview = ItemPreview {
         item_type: parsed.item_type,
         title: parsed.title,
         start_at: parsed.start_at,
         end_at: parsed.end_at,
         location: parsed.location,
-        confirmation_no: parsed.confirmation_no,
+        confirmation_no,
         notes: parsed.notes,
         details: parsed.details,
         links: parsed.links,

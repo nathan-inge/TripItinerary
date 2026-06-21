@@ -14,8 +14,57 @@ use crate::models::{
     ParseTextRequest, ParseTextResponse, UpdateItem,
 };
 use crate::parse::prompt::estimate_tokens;
+use crate::parse::redact::{lookup_conf_placeholder, redact_for_remote};
 use crate::routes::trips::require_trip_access;
 use crate::AppState;
+
+/// Load traveler names for a trip — needed to redact them out of bodies
+/// before they leave the host. Returns owned strings so the caller can
+/// borrow them as `&[&str]` for redact_for_remote.
+pub(crate) async fn traveler_names_for(
+    pool: &SqlitePool,
+    trip_id: &str,
+) -> AppResult<Vec<String>> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM travelers WHERE trip_id = ?1")
+            .bind(trip_id)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
+/// Substitute a placeholder confirmation_no back to its real value via the
+/// map. If the LLM emitted a non-placeholder value, log a WARN so the
+/// operator can see the regex needs another label, and keep the raw value
+/// (lenient — strict-drop would silently lose conf #s on unlabeled emails).
+pub(crate) fn restore_conf_no(
+    confirmation_no: Option<String>,
+    conf_map: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let Some(value) = confirmation_no else {
+        return None;
+    };
+    if value.starts_with("[REDACTED:CONF_") {
+        match lookup_conf_placeholder(&value, conf_map) {
+            Some(real) => Some(real.clone()),
+            None => {
+                tracing::warn!(
+                    "parser returned unknown conf placeholder {:?}; dropping",
+                    value
+                );
+                None
+            }
+        }
+    } else {
+        tracing::warn!(
+            "parser returned a raw conf value ({} chars); the label regex \
+             likely missed this email's format. Keeping value but consider \
+             adding the label to redact_booking_refs.",
+            value.len()
+        );
+        Some(value)
+    }
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -53,14 +102,21 @@ pub async fn parse_text(
         )
     })?;
 
-    let est = estimate_tokens(raw_text);
+    // Redact PII + conf #s + traveler names before the text leaves the host.
+    // raw_source kept in the response is the original; only the prompt going
+    // to the LLM is the redacted text.
+    let names = traveler_names_for(&state.pool, &trip_id).await?;
+    let names_ref: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    let redacted = redact_for_remote(raw_text, &names_ref);
+
+    let est = estimate_tokens(&redacted.text);
     state
         .token_cap
         .check_and_reserve(est, state.cfg.daily_token_cap)
         .await
         .map_err(AppError::BadRequest)?;
 
-    let (parsed, actual) = match parser.parse_item(raw_text).await {
+    let (parsed, actual) = match parser.parse_item(&redacted.text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;
@@ -69,13 +125,15 @@ pub async fn parse_text(
     };
     state.token_cap.settle(est, actual).await;
 
+    let confirmation_no = restore_conf_no(parsed.confirmation_no, &redacted.conf_map);
+
     let preview = ItemPreview {
         item_type: parsed.item_type,
         title: parsed.title,
         start_at: parsed.start_at,
         end_at: parsed.end_at,
         location: parsed.location,
-        confirmation_no: parsed.confirmation_no,
+        confirmation_no,
         notes: parsed.notes,
         details: parsed.details,
         links: parsed.links,
