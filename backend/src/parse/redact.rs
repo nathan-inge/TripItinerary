@@ -37,7 +37,7 @@ pub struct RedactOutput {
 
 /// Full pre-LLM redaction. Applies every pass in §1–6 of the module docs.
 pub fn redact_for_remote(text: &str, traveler_names: &[&str]) -> RedactOutput {
-    let mut out = text.to_string();
+    let mut out = strip_zero_width(text);
     out = redact_emails_outside_urls(&out);
     out = redact_card_numbers(&out);
     out = redact_ssns(&out);
@@ -55,13 +55,34 @@ pub fn redact_for_remote(text: &str, traveler_names: &[&str]) -> RedactOutput {
 /// in production after this commit; tests may use it).
 #[cfg(test)]
 pub fn redact(text: &str) -> String {
-    let mut out = text.to_string();
+    let mut out = strip_zero_width(text);
     out = redact_emails_outside_urls(&out);
     out = redact_card_numbers(&out);
     out = redact_ssns(&out);
     out = redact_phones(&out);
     out = redact_phones_in_known_urls(&out);
     out
+}
+
+/// Drop invisible Unicode chars that some email templates sprinkle in for
+/// anti-bot or rendering reasons. They convey no meaning to a human reader
+/// but break every regex that expects clean ASCII separators between fields
+/// (e.g. Sixt embeds ZWNJ between "Booking:" and the conf #, which made our
+/// label→value bridge fail). Stripped from the LLM-bound text only;
+/// raw_source in the DB still has the originals.
+fn strip_zero_width(text: &str) -> String {
+    text.chars()
+        .filter(|c| {
+            !matches!(
+                *c,
+                '\u{200B}'   // ZERO WIDTH SPACE
+                | '\u{200C}' // ZERO WIDTH NON-JOINER
+                | '\u{200D}' // ZERO WIDTH JOINER
+                | '\u{2060}' // WORD JOINER
+                | '\u{FEFF}' // ZERO WIDTH NO-BREAK SPACE / BOM
+            )
+        })
+        .collect()
 }
 
 // ---------- card numbers ----------
@@ -694,6 +715,40 @@ mod tests {
     fn redacts_phone_in_tel_url() {
         let r = redact("Call <tel:+14155551234>");
         assert!(r.contains("[REDACTED:PHONE]"));
+    }
+
+    // ---------- invisible-Unicode separator handling ----------
+
+    #[test]
+    fn redacts_conf_with_zwnj_separator() {
+        // Sixt-style: zero-width non-joiner between label and value.
+        // Without preprocessing, the [\s:#]* class wouldn't bridge the ZWNJ.
+        let src = "Booking: \u{200C} 9730769870\u{200C}\nThanks";
+        let r = redact_for_remote(src, &[]);
+        assert!(
+            r.text.contains("[REDACTED:CONF_1]"),
+            "got: {:?}",
+            r.text
+        );
+        assert!(!r.text.contains("9730769870"));
+        assert_eq!(r.conf_map.get("[REDACTED:CONF_1]"), Some(&"9730769870".to_string()));
+    }
+
+    #[test]
+    fn strip_zero_width_handles_common_cases() {
+        let s = "a\u{200B}b\u{200C}c\u{200D}d\u{2060}e\u{FEFF}f";
+        assert_eq!(strip_zero_width(s), "abcdef");
+    }
+
+    #[test]
+    fn unlabeled_occurrence_also_redacted_globally() {
+        // Subject line repeats the conf# WITHOUT a label, but the labeled
+        // occurrence in the body finds it; global substitution sweeps the
+        // subject line too.
+        let src = "Subject: confirmed: #9730769870\n\
+                   Booking: 9730769870 thanks.";
+        let r = redact_for_remote(src, &[]);
+        assert_eq!(r.text.matches("[REDACTED:CONF_1]").count(), 2);
     }
 
     #[test]
