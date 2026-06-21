@@ -164,7 +164,11 @@ pub async fn intake(
         );
     }
 
-    if state.parser.is_none() {
+    // Dry-run leaves state.parser=None deliberately; let it through so the
+    // background task can run the redactor and log what would have been
+    // sent. Genuine "no backend" still drops here.
+    let is_dry_run = matches!(state.cfg.parse_backend, ParseBackend::DryRun);
+    if state.parser.is_none() && !is_dry_run {
         tracing::warn!(
             "intake/email matched trip {}, but no parse backend configured; dropping",
             trip_name
