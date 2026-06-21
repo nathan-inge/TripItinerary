@@ -186,17 +186,33 @@ fn redact_emails_outside_urls(text: &str) -> String {
 // ---------- traveler names ----------
 
 fn redact_names(text: &str, names: &[&str]) -> String {
-    let mut out = text.to_string();
+    // Build the redaction set: each traveler name AS-WHOLE plus each
+    // whitespace-delimited word. A traveler stored as "Nathan Inge" will
+    // redact "Nathan Inge", "Nathan", and "Inge" — last names are at least
+    // as sensitive as first names so we can't only match the full string.
+    //
+    // Skip parts < 3 chars: "Mo", "Al", "Ng" — too prone to false positives
+    // against substrings of unrelated content.
+    let mut parts: Vec<String> = Vec::new();
     for name in names {
         let trimmed = name.trim();
-        // Skip short names — too risky for false positives ("Al", "Mo").
-        if trimmed.len() < 3 {
-            continue;
+        if trimmed.len() >= 3 {
+            parts.push(trimmed.to_string());
         }
-        let escaped = regex::escape(trimmed);
-        // Whole-word, case-insensitive. The first `(?i:)` scope is just the
-        // label-style group from booking_ref but reused — works for plain
-        // strings too.
+        for word in trimmed.split_whitespace() {
+            if word.len() >= 3 {
+                parts.push(word.to_string());
+            }
+        }
+    }
+    // Process longer first so "Nathan Inge" matches before its component
+    // words. Dedup preserves order (longest first).
+    parts.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    parts.dedup();
+
+    let mut out = text.to_string();
+    for part in &parts {
+        let escaped = regex::escape(part);
         let pattern = format!(r"(?i)\b{}\b", escaped);
         if let Ok(re) = Regex::new(&pattern) {
             out = re.replace_all(&out, "[REDACTED:NAME]").into_owned();
@@ -210,10 +226,12 @@ fn redact_names(text: &str, names: &[&str]) -> String {
 fn booking_ref_regex() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        // Label is case-insensitive via `(?i:...)`; value stays case-sensitive
-        // so the heuristic in `looks_like_conf` can reject lowercase words.
-        // `[\s:#]*` between label and value matches across newlines (`\s`
-        // includes `\n`), so multi-line shapes like
+        // Label is case-insensitive via `(?i:...)`. Value charset deliberately
+        // permissive — it allows mixed case, slashes, equals, plus, dot, and
+        // hyphen so password-style PINs like "86/==7cK" are caught. The
+        // `looks_like_conf` heuristic below filters out English-word false
+        // positives. `[\s:#]*` matches across newlines so multi-line shapes
+        // like
         //     Booking code
         //         X57BBZ
         // get caught.
@@ -230,23 +248,21 @@ fn booking_ref_regex() -> &'static Regex {
             r"|pin",
             r")\b)",
             r"[\s:#]*",
-            r"(?-i:([A-Z0-9][A-Z0-9-]{3,19}))",
+            r"([A-Za-z0-9][A-Za-z0-9/=\-]{3,19})",
         ))
         .unwrap()
     })
 }
 
-/// True if `s` looks like a booking ref rather than an English word that
-/// happened to follow a label. Guard against e.g. "Booking processed by..."
-/// where "processed" would otherwise match. Codes are uppercase/digits;
-/// English words have lowercase.
+/// True if `s` looks like a booking ref/PIN rather than an English word.
+/// English words are pure ASCII letters with at least one lowercase letter
+/// (e.g. "processed", "confirmed"). Anything else — uppercase-only codes
+/// like "ABCDEF", digit-containing codes like "ABC123" or "6214", and
+/// password-style strings like "86/==7cK" — is accepted.
 fn looks_like_conf(s: &str) -> bool {
-    if s.chars().any(|c| c.is_ascii_lowercase()) {
-        return false;
-    }
-    let has_digit = s.chars().any(|c| c.is_ascii_digit());
-    let upper_count = s.chars().filter(|c| c.is_ascii_uppercase()).count();
-    has_digit || upper_count >= 5
+    let all_letters = s.chars().all(|c| c.is_ascii_alphabetic());
+    let has_lowercase = s.chars().any(|c| c.is_ascii_lowercase());
+    !(all_letters && has_lowercase)
 }
 
 fn redact_booking_refs(text: &str) -> (String, HashMap<String, String>) {
@@ -455,6 +471,34 @@ mod tests {
         assert_eq!(map.len(), 2);
     }
 
+    #[test]
+    fn redacts_password_style_pin() {
+        // Real-world example: a mixed-case PIN with slashes and equals.
+        let src = "Booking reference\nABC123\nPIN\n86/==7cK)\nThanks";
+        let (out, map) = redact_booking_refs(src);
+        assert!(!out.contains("86/==7cK"), "got: {out:?}");
+        assert!(!out.contains("ABC123"));
+        // Two distinct values redacted.
+        assert_eq!(map.len(), 2, "map: {map:?}");
+        // The `)` is NOT part of the PIN — it should still appear in output.
+        assert!(out.contains(")"));
+    }
+
+    #[test]
+    fn pin_multi_line_value() {
+        let (out, _) = redact_booking_refs("PIN\n86/==7cK");
+        assert!(out.contains("[REDACTED:CONF_1]"));
+    }
+
+    #[test]
+    fn rejects_pure_lowercase_after_label() {
+        // looks_like_conf safety net: "code" follows the label "Booking" but
+        // is an English word.
+        let (out, map) = redact_booking_refs("Booking code is provided below.");
+        assert!(map.is_empty(), "got: {map:?}");
+        assert_eq!(out, "Booking code is provided below.");
+    }
+
     // ---------- names ----------
 
     #[test]
@@ -469,6 +513,31 @@ mod tests {
         let out = redact_names("welcome NATHAN inge", &["Nathan Inge"]);
         // "NATHAN inge" as a whole-word match against "Nathan Inge"
         assert!(out.contains("[REDACTED:NAME]"));
+    }
+
+    #[test]
+    fn redacts_each_word_of_multi_word_name() {
+        // "To: Nathan Inge <addr>" should redact both names.
+        let out = redact_names("To: Nathan Inge <addr>", &["Nathan Inge"]);
+        assert!(!out.contains("Nathan"));
+        assert!(!out.contains("Inge"));
+        let count = out.matches("[REDACTED:NAME]").count();
+        assert_eq!(count, 1, "full string matched first: {out:?}");
+    }
+
+    #[test]
+    fn redacts_last_name_alone() {
+        // First name doesn't appear; last name should still be redacted.
+        let out = redact_names("Mr. Inge will arrive at 10am.", &["Nathan Inge"]);
+        assert!(out.contains("[REDACTED:NAME]"));
+        assert!(!out.contains("Inge"));
+    }
+
+    #[test]
+    fn redacts_first_name_alone() {
+        let out = redact_names("Hi Nathan, thanks!", &["Nathan Inge"]);
+        assert!(out.contains("[REDACTED:NAME]"));
+        assert!(!out.contains("Nathan"));
     }
 
     #[test]
