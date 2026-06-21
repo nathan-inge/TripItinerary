@@ -19,7 +19,7 @@ use crate::models::{
     SharedTripDetail, Traveler, Trip, TripDetail, UpdateItem, UpdateTrip, UpsertDayNote,
 };
 use crate::config::ParseBackend;
-use crate::parse::dry_run::log_dry_run;
+use crate::parse::dry_run::{log_dry_run, log_llm_input};
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::redact_for_remote;
 use crate::routes::items::{restore_conf_no, traveler_names_for};
@@ -330,6 +330,8 @@ async fn parse_text(
     let parser = state.parser.as_ref().ok_or_else(|| {
         AppError::BadRequest("no parse backend configured".into())
     })?;
+
+    log_llm_input("share/items/parse", &redacted);
 
     let est = estimate_tokens(&redacted.text);
     state

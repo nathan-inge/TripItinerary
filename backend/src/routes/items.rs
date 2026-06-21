@@ -14,7 +14,7 @@ use crate::models::{
     ParseTextRequest, ParseTextResponse, UpdateItem,
 };
 use crate::config::ParseBackend;
-use crate::parse::dry_run::log_dry_run;
+use crate::parse::dry_run::{log_dry_run, log_llm_input};
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::{lookup_conf_placeholder, redact_for_remote};
 use crate::routes::trips::require_trip_access;
@@ -120,6 +120,10 @@ pub async fn parse_text(
             "no parse backend configured (set TRIPIT_PARSE_BACKEND and credentials)".into(),
         )
     })?;
+
+    // Audit log of what is about to leave the redactor — independent of
+    // which backend processes it. Spot-check with `journalctl -f`.
+    log_llm_input("items/parse", &redacted);
 
     let est = estimate_tokens(&redacted.text);
     state

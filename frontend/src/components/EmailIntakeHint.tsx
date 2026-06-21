@@ -48,7 +48,10 @@ export default function EmailIntakeHint({ tripId, tripName, manageHref }: Props)
               Manage senders →
             </Link>
           </>
-        )}
+        )}{' '}
+        <Link to="/help" className="text-teal-700 hover:underline">
+          How parsing works →
+        </Link>
       </p>
     </div>
   );

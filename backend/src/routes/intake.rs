@@ -29,7 +29,7 @@ use uuid::Uuid;
 use crate::error::AppResult;
 use crate::models::{ItemSource, ParseStatus};
 use crate::config::ParseBackend;
-use crate::parse::dry_run::log_dry_run;
+use crate::parse::dry_run::{log_dry_run, log_llm_input};
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::redact_for_remote;
 use crate::routes::items::{restore_conf_no, traveler_names_for};
@@ -239,6 +239,11 @@ async fn run_parse_and_insert(
         Some(p) => p,
         None => return, // already logged in caller
     };
+
+    log_llm_input(
+        &format!("intake/email trip={trip_name} sender={sender}"),
+        &redacted,
+    );
 
     let est = estimate_tokens(&redacted.text);
     if let Err(e) = state

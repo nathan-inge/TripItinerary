@@ -3,6 +3,7 @@ import TripList from './pages/TripList';
 import Trip from './pages/Trip';
 import TripManage from './pages/TripManage';
 import SharedTrip from './pages/SharedTrip';
+import Help from './pages/Help';
 
 export default function App() {
   return (
@@ -12,6 +13,13 @@ export default function App() {
           <Link to="/" className="text-lg font-semibold tracking-tight">
             TripItinerary
           </Link>
+          <Link
+            to="/help"
+            className="text-xs text-teal-100 hover:text-white"
+            title="How parsing works + safeguards"
+          >
+            ? Help
+          </Link>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-6">
@@ -20,6 +28,7 @@ export default function App() {
           <Route path="/trips/:id" element={<Trip />} />
           <Route path="/trips/:id/manage" element={<TripManage />} />
           <Route path="/share/:token" element={<SharedTrip />} />
+          <Route path="/help" element={<Help />} />
         </Routes>
       </main>
     </div>

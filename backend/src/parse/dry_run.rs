@@ -9,6 +9,38 @@ use regex::Regex;
 
 use crate::parse::redact::RedactOutput;
 
+/// Always-on audit log of what would be sent to the LLM, regardless of
+/// backend. Truncates the body so journalctl entries stay manageable on
+/// large emails. Does NOT include the raw input or the real conf values
+/// — those stay local; logging them would just duplicate PII into the
+/// system journal.
+pub fn log_llm_input(label: &str, redacted: &RedactOutput) {
+    const MAX_BODY_LOG_BYTES: usize = 4096;
+    let counts = count_placeholders(&redacted.text);
+    let summary = if counts.is_empty() {
+        "(none)".to_string()
+    } else {
+        let mut parts: Vec<String> = counts.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        parts.sort();
+        parts.join(" ")
+    };
+
+    let mut body = redacted.text.clone();
+    if body.len() > MAX_BODY_LOG_BYTES {
+        let mut cut = MAX_BODY_LOG_BYTES;
+        while !body.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let extra = body.len() - cut;
+        body.truncate(cut);
+        body.push_str(&format!("\n…[truncated {extra} bytes]"));
+    }
+
+    tracing::info!(
+        "\n=== LLM INPUT [{label}] ===\n--- placeholders: {summary} ---\n{body}\n=== END LLM INPUT ==="
+    );
+}
+
 pub fn log_dry_run(label: &str, raw_text: &str, redacted: &RedactOutput) {
     let counts = count_placeholders(&redacted.text);
 
