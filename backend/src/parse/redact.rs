@@ -131,20 +131,27 @@ fn redact_ssns(text: &str) -> String {
 
 fn redact_phones(text: &str) -> String {
     static R: OnceLock<Regex> = OnceLock::new();
-    // Common US/international shapes. Requires at least one separator so that
-    // bare 10-digit strings (e.g. order IDs) aren't caught.
+    // Format-agnostic: a run of 10–15 digits separated by typical phone
+    // punctuation (space, dot, hyphen, parens). Requires at least 3 digit
+    // groups so contiguous digit strings (order IDs, postal codes) don't
+    // match, and dates like "2026-10-13" (8 digits) are excluded by the
+    // length-count check below.
     let r = R.get_or_init(|| {
-        Regex::new(
-            r"(?x)
-            (?:\+?\d{1,3}[\s.\-])?            # optional country code
-            \(?\d{3}\)?[\s.\-]                # area code (parens optional)
-            \d{3}[\s.\-]\d{4}                 # 3-4 split
-            \b
-            ",
-        )
-        .unwrap()
+        Regex::new(r"\+?\d+(?:[\s.\-()]+\d+){2,}").unwrap()
     });
-    r.replace_all(text, "[REDACTED:PHONE]").into_owned()
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for m in r.find_iter(text) {
+        let candidate = m.as_str();
+        let digit_count = candidate.chars().filter(|c| c.is_ascii_digit()).count();
+        if (10..=15).contains(&digit_count) {
+            out.push_str(&text[last..m.start()]);
+            out.push_str("[REDACTED:PHONE]");
+            last = m.end();
+        }
+    }
+    out.push_str(&text[last..]);
+    out
 }
 
 // ---------- naked emails ----------
@@ -212,8 +219,19 @@ fn redact_names(text: &str, names: &[&str]) -> String {
 
     let mut out = text.to_string();
     for part in &parts {
-        let escaped = regex::escape(part);
-        let pattern = format!(r"(?i)\b{}\b", escaped);
+        // Build a tolerant pattern: each whitespace-delimited word is escaped
+        // for regex literally, then joined with `\s+`. So "Nathan Inge" matches
+        // "Nathan Inge", "Nathan  Inge" (double space), "Nathan\nInge"
+        // (linebreak), and "Nathan\tInge". Case-insensitive via (?i).
+        let words: Vec<String> = part
+            .split_whitespace()
+            .map(regex::escape)
+            .collect();
+        if words.is_empty() {
+            continue;
+        }
+        let body = words.join(r"\s+");
+        let pattern = format!(r"(?i)\b{body}\b");
         if let Ok(re) = Regex::new(&pattern) {
             out = re.replace_all(&out, "[REDACTED:NAME]").into_owned();
         }
@@ -357,6 +375,42 @@ mod tests {
         assert!(r.contains("[REDACTED:PHONE]"));
         let r2 = redact("Tel: +1 415 555 1234");
         assert!(r2.contains("[REDACTED:PHONE]"));
+    }
+
+    #[test]
+    fn redacts_phone_hyphenated() {
+        let r = redact("Direct: 415-555-1234.");
+        assert!(r.contains("[REDACTED:PHONE]"));
+    }
+
+    #[test]
+    fn redacts_phone_spanish_grouping() {
+        // Spanish: +34 944 86 21 00 — 3-3-2-2-2 split. Sixt Bilbao actually
+        // uses this format.
+        let r = redact("Sixt Bilbao: +34 944 86 21 00");
+        assert!(r.contains("[REDACTED:PHONE]"), "got: {r:?}");
+        assert!(!r.contains("944"));
+    }
+
+    #[test]
+    fn redacts_phone_uk_grouping() {
+        let r = redact("UK: +44 20 7946 0958");
+        assert!(r.contains("[REDACTED:PHONE]"), "got: {r:?}");
+    }
+
+    #[test]
+    fn skips_date_as_phone() {
+        // 8 digits → below the 10-15 phone range.
+        let r = redact("Date: 2026-10-13");
+        assert!(!r.contains("[REDACTED:PHONE]"));
+        assert!(r.contains("2026-10-13"));
+    }
+
+    #[test]
+    fn skips_contiguous_digit_string_as_phone() {
+        // No separators → not phone-shaped.
+        let r = redact("Order 1234567890123 ready.");
+        assert!(!r.contains("[REDACTED:PHONE]"));
     }
 
     #[test]
@@ -538,6 +592,30 @@ mod tests {
         let out = redact_names("Hi Nathan, thanks!", &["Nathan Inge"]);
         assert!(out.contains("[REDACTED:NAME]"));
         assert!(!out.contains("Nathan"));
+    }
+
+    #[test]
+    fn redacts_name_uppercased_full() {
+        // Real email subject: "BOOKING ABC - NATHAN INGE"
+        let out = redact_names("BOOKING ABC - NATHAN INGE", &["Nathan Inge"]);
+        assert!(!out.contains("NATHAN"), "got: {out:?}");
+        assert!(!out.contains("INGE"), "got: {out:?}");
+    }
+
+    #[test]
+    fn redacts_name_across_newline() {
+        // "Thanks,\nNathan Inge\nSent from..."
+        let out = redact_names("Thanks,\nNathan Inge\n", &["Nathan Inge"]);
+        assert!(!out.contains("Nathan"));
+        assert!(!out.contains("Inge"));
+    }
+
+    #[test]
+    fn redacts_name_across_multiple_spaces() {
+        let out = redact_names("Nathan  Inge", &["Nathan Inge"]);
+        // Multi-word pattern with \s+ should match.
+        assert!(!out.contains("Nathan"));
+        assert!(!out.contains("Inge"));
     }
 
     #[test]
