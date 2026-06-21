@@ -42,6 +42,7 @@ pub fn redact_for_remote(text: &str, traveler_names: &[&str]) -> RedactOutput {
     out = redact_card_numbers(&out);
     out = redact_ssns(&out);
     out = redact_phones(&out);
+    out = redact_phones_in_known_urls(&out);
     out = redact_names(&out, traveler_names);
     let (out, conf_map) = redact_booking_refs(&out);
     RedactOutput {
@@ -59,6 +60,7 @@ pub fn redact(text: &str) -> String {
     out = redact_card_numbers(&out);
     out = redact_ssns(&out);
     out = redact_phones(&out);
+    out = redact_phones_in_known_urls(&out);
     out
 }
 
@@ -154,6 +156,28 @@ fn redact_phones(text: &str) -> String {
     out
 }
 
+// ---------- phone numbers inside known phone-bearing URLs ----------
+
+/// Phone-bearing URLs (tel:, sms:, wa.me/, WhatsApp deep-links) carry the
+/// number as a contiguous digit run with no separators — so the generic
+/// `redact_phones` regex (which requires separators) skips them, and the
+/// number leaks through inside the URL.
+///
+/// Targeted fix: only strip digits in URL prefixes we know are phone-bearing.
+/// Random tracking URLs with embedded timestamps (`?ts=1729800000`) are NOT
+/// affected — broader URL-digit stripping risks breaking manage-booking
+/// URLs that depend on the timestamp staying intact.
+fn redact_phones_in_known_urls(text: &str) -> String {
+    static R: OnceLock<Regex> = OnceLock::new();
+    let r = R.get_or_init(|| {
+        Regex::new(
+            r"(?i)((?:tel:|sms:|wa\.me/|api\.whatsapp\.com/send\?(?:phone|wa_phone_number)=))\+?\d{10,15}",
+        )
+        .unwrap()
+    });
+    r.replace_all(text, "${1}[REDACTED:PHONE]").into_owned()
+}
+
 // ---------- naked emails ----------
 
 fn url_regex() -> &'static Regex {
@@ -231,7 +255,18 @@ fn redact_names(text: &str, names: &[&str]) -> String {
             continue;
         }
         let body = words.join(r"\s+");
-        let pattern = format!(r"(?i)\b{body}\b");
+
+        // Prefix-match for single-word names ≥5 chars: "Nathan" should also
+        // catch "Nathaniel" (formal form), "Roberts" should match "Robert"...
+        // Allowing trailing word characters keeps the match anchored at a
+        // word boundary on the LEFT but extends the match through any letter
+        // suffix. The ≥5-char floor keeps short tokens like "Inge" (4) or
+        // "Nat" (3) from prefix-exploding into unrelated words.
+        let pattern = if words.len() == 1 && words[0].len() >= 5 {
+            format!(r"(?i)\b{body}\w*")
+        } else {
+            format!(r"(?i)\b{body}\b")
+        };
         if let Ok(re) = Regex::new(&pattern) {
             out = re.replace_all(&out, "[REDACTED:NAME]").into_owned();
         }
@@ -616,6 +651,57 @@ mod tests {
         // Multi-word pattern with \s+ should match.
         assert!(!out.contains("Nathan"));
         assert!(!out.contains("Inge"));
+    }
+
+    #[test]
+    fn prefix_match_catches_longer_variant() {
+        // Traveler stored as "Nathan" — email addresses them formally as
+        // "Nathaniel". \bNathan\b would fail the right-side boundary; the
+        // prefix-match form \bNathan\w* matches both.
+        let out = redact_names("Dear Nathaniel, thanks.", &["Nathan"]);
+        assert!(!out.contains("Nathaniel"));
+        assert!(!out.contains("Nathan"));
+        assert!(out.contains("[REDACTED:NAME]"));
+    }
+
+    #[test]
+    fn prefix_match_still_catches_exact() {
+        let out = redact_names("Hi Nathan!", &["Nathan"]);
+        assert!(!out.contains("Nathan"));
+    }
+
+    #[test]
+    fn short_names_do_not_prefix_match() {
+        // "Inge" is 4 chars — below the 5-char threshold for prefix. So
+        // "Ingeborg" is NOT redacted (and "Inge" alone is).
+        let out = redact_names("Ingeborg called.", &["Inge"]);
+        assert!(out.contains("Ingeborg"), "got: {out:?}");
+
+        let out = redact_names("Inge called.", &["Inge"]);
+        assert!(out.contains("[REDACTED:NAME]"), "got: {out:?}");
+    }
+
+    // ---------- URL phone numbers ----------
+
+    #[test]
+    fn redacts_phone_in_wa_me_url() {
+        let r = redact("Reach me at http://wa.me/17203310162 anytime.");
+        assert!(r.contains("[REDACTED:PHONE]"));
+        assert!(!r.contains("17203310162"));
+    }
+
+    #[test]
+    fn redacts_phone_in_tel_url() {
+        let r = redact("Call <tel:+14155551234>");
+        assert!(r.contains("[REDACTED:PHONE]"));
+    }
+
+    #[test]
+    fn preserves_timestamp_in_unrelated_url() {
+        // 10-digit unix timestamp in a tracking URL should NOT be stripped —
+        // those URLs need their query string intact to function.
+        let r = redact("Manage: https://airline.com/?ts=1729800000&pnr=ABC");
+        assert!(r.contains("1729800000"), "got: {r:?}");
     }
 
     #[test]
