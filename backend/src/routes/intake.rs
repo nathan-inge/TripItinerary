@@ -7,9 +7,11 @@
 //!   3. First non-empty line of `text` is treated as the trip-name hint.
 //!      Trip match is case-insensitive on whitespace-normalized name.
 //!   4. The `from` address must be on the trip's email-sender allow-list.
-//!   5. On a clean match, parse via Claude → insert item with source=email.
-//!   6. Always respond 204. Failures are logged but never bubbled to the
-//!      Worker (avoid retries; a forwarded confirmation isn't worth a queue).
+//!   5. We respond 204 *immediately* — Cloudflare's tunnel cuts the connection
+//!      at 100 s and the Worker doesn't care about the parse result. The LLM
+//!      call + insert happens on a detached tokio task.
+//!   6. Failures are logged but never bubbled to the Worker (a forwarded
+//!      confirmation isn't worth a retry queue).
 
 use axum::{
     body::Bytes,
@@ -134,21 +136,72 @@ pub async fn intake(
         return Ok(StatusCode::NO_CONTENT);
     }
 
-    // Step 6: parse. Strip the trip-name line so Claude doesn't accidentally
-    // treat it as part of the confirmation.
+    // Step 6: build the prompt text. Strip the trip-name annotation, prepend
+    // the subject. Truncate large bodies — promotional HTML pages can be
+    // hundreds of KB and the useful content fits comfortably in 50 KB.
     let raw_text = strip_first_line(&email.text);
-    let prompt_text = if email.subject.is_empty() {
-        raw_text.clone()
+    let mut prompt_text = if email.subject.is_empty() {
+        raw_text
     } else {
         format!("Subject: {}\n\n{}", email.subject, raw_text)
     };
+    if prompt_text.len() > MAX_PROMPT_BYTES {
+        // Truncate at a char boundary, append a marker so the model knows.
+        let mut cut = MAX_PROMPT_BYTES;
+        while !prompt_text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        prompt_text.truncate(cut);
+        prompt_text.push_str("\n\n[truncated]");
+        tracing::info!(
+            "intake/email body truncated to {} bytes (original {} KB)",
+            MAX_PROMPT_BYTES,
+            email.text.len() / 1024
+        );
+    }
 
-    let Some(parser) = state.parser.as_ref() else {
+    if state.parser.is_none() {
         tracing::warn!(
             "intake/email matched trip {}, but no parse backend configured; dropping",
             trip_name
         );
         return Ok(StatusCode::NO_CONTENT);
+    }
+
+    tracing::info!(
+        trip = %trip_name,
+        sender = %from_norm,
+        bytes = prompt_text.len(),
+        "intake/email queued for background parse"
+    );
+
+    // Detach the slow path. We've already done all the cheap checks; if the
+    // LLM call hangs the Cloudflare tunnel would 524 the Worker, the Worker
+    // would log an error, and the parse would still be in flight here doing
+    // nothing useful. Returning immediately keeps the contract honest: the
+    // Worker is just notifying us; we're responsible for what comes next.
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        run_parse_and_insert(task_state, trip_id, trip_name, from_norm, prompt_text).await;
+    });
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 50 KB cap on what we send to the LLM. Confirmations rarely need more
+/// than ~5 KB of actual content; the rest is HTML markup or quoted threads.
+const MAX_PROMPT_BYTES: usize = 50_000;
+
+async fn run_parse_and_insert(
+    state: AppState,
+    trip_id: String,
+    trip_name: String,
+    sender: String,
+    prompt_text: String,
+) {
+    let parser = match state.parser.as_ref() {
+        Some(p) => p,
+        None => return, // already logged in caller
     };
 
     let est = estimate_tokens(&prompt_text);
@@ -158,25 +211,30 @@ pub async fn intake(
         .await
     {
         tracing::warn!("intake/email token cap: {e}; dropping");
-        return Ok(StatusCode::NO_CONTENT);
+        return;
     }
+
     let (parsed, used) = match parser.parse_item(&prompt_text).await {
         Ok(v) => v,
         Err(e) => {
             state.token_cap.settle(est, 0).await;
-            tracing::error!("intake/email parser ({}) error: {e:#}; dropping", parser.kind());
-            return Ok(StatusCode::NO_CONTENT);
+            tracing::error!(
+                trip = %trip_name,
+                sender = %sender,
+                "intake/email parser ({}) error: {e:#}; dropping",
+                parser.kind()
+            );
+            return;
         }
     };
     state.token_cap.settle(est, used).await;
 
-    // Step 7: insert item.
     let id = Uuid::now_v7().to_string();
     let now = Utc::now().to_rfc3339();
     let details_json = serde_json::to_string(&parsed.details).unwrap_or_else(|_| "{}".into());
     let links_json = serde_json::to_string(&parsed.links).unwrap_or_else(|_| "[]".into());
 
-    sqlx::query(
+    let res = sqlx::query(
         "INSERT INTO items (id, trip_id, type, title, start_at, end_at, location, confirmation_no,
                             notes, details_json, links_json, raw_source, source, parse_status,
                             created_at, updated_at)
@@ -201,16 +259,21 @@ pub async fn intake(
     })
     .bind(&now)
     .execute(&state.pool)
-    .await?;
+    .await;
 
-    tracing::info!(
-        trip = %trip_name,
-        sender = %from_norm,
-        item = %parsed.title,
-        "intake/email saved"
-    );
-
-    Ok(StatusCode::NO_CONTENT)
+    match res {
+        Ok(_) => tracing::info!(
+            trip = %trip_name,
+            sender = %sender,
+            item = %parsed.title,
+            "intake/email saved"
+        ),
+        Err(e) => tracing::error!(
+            trip = %trip_name,
+            sender = %sender,
+            "intake/email DB insert failed: {e}"
+        ),
+    }
 }
 
 fn hmac_hex(key: &[u8], body: &[u8]) -> String {
