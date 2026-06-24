@@ -1,3 +1,4 @@
+import { forceReauth } from '../lib/auth';
 import type {
   CreateItem,
   CreateShareLink,
@@ -19,10 +20,30 @@ async function req<T>(
   init: RequestInit = {},
   parseJson = true,
 ): Promise<T> {
-  const resp = await fetch(`/api${path}`, {
-    headers: { 'content-type': 'application/json' },
-    ...init,
-  });
+  // Guest /share/:token routes are bypassed at the Cloudflare Access edge and
+  // do their own token auth, so they never get the 302-to-login that signals an
+  // expired owner session — don't let a guest's flaky network trigger a reauth
+  // reload.
+  const owner = !path.startsWith('/share/');
+
+  let resp: Response;
+  try {
+    resp = await fetch(`/api${path}`, {
+      headers: { 'content-type': 'application/json' },
+      // Surface Cloudflare Access' 302-to-login as an opaqueredirect instead of
+      // silently following it into a cross-origin CORS failure.
+      redirect: owner ? 'manual' : 'follow',
+      ...init,
+    });
+  } catch (e) {
+    // Network or cross-origin redirect failure — most likely an expired Access
+    // session after the app shell was already loaded from cache.
+    if (owner) return forceReauth();
+    throw e;
+  }
+  if (owner && resp.type === 'opaqueredirect') {
+    return forceReauth();
+  }
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
