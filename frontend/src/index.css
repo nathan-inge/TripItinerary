@@ -26,7 +26,7 @@
 
 /* Rendered HTML from the day-note rich-text editor. */
 .day-note-prose {
-  @apply text-sm text-slate-700;
+  @apply text-sm text-slate-700 break-words;
 }
 .day-note-prose p {
   @apply mb-2;

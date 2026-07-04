@@ -154,7 +154,7 @@ export default function ItemCard({
                 />
               </div>
               {item.notes && (
-                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">
                   {item.notes}
                 </p>
               )}
