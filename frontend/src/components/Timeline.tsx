@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type {
   CreateItem,
   DayNote,
@@ -23,6 +24,14 @@ interface Props {
 function isoDate(iso: string): string {
   // First 10 chars of an RFC3339 string are the local-to-item YYYY-MM-DD.
   return iso.slice(0, 10);
+}
+
+// Local calendar date as YYYY-MM-DD — the boundary for "in the past".
+function todayIso(): string {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${mm}-${dd}`;
 }
 
 function eachDate(start: string, end: string): string[] {
@@ -92,6 +101,20 @@ export default function Timeline({
 }: Props) {
   const days = eachDate(trip.start_date, trip.end_date);
   const travelers: Traveler[] = trip.travelers;
+  const today = todayIso();
+
+  // Days before today start collapsed; today and future start expanded.
+  // Lazy init captures the day range at mount; user toggles override it.
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => new Set(days.filter((d) => d < today)),
+  );
+  const toggleDay = (date: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
 
   const itemsByDay = new Map<string, Item[]>();
   const spans: Span[] = [];
@@ -123,6 +146,14 @@ export default function Timeline({
           .slice()
           .sort((a, b) => a.start_at.localeCompare(b.start_at));
 
+        const isCollapsed = collapsed.has(date);
+        const cardCount = continuing.length + endsToday.length + dayItems.length;
+        const summaryParts: string[] = [];
+        if (cardCount > 0)
+          summaryParts.push(`${cardCount} item${cardCount === 1 ? '' : 's'}`);
+        if (noteFor(date)) summaryParts.push('notes');
+        const summary = summaryParts.join(' · ') || 'Empty';
+
         return (
           <section key={date} className="relative pl-10">
             {/* spine */}
@@ -139,59 +170,67 @@ export default function Timeline({
               {dayIdx + 1}
             </span>
 
-            <DayHeader date={date} />
+            <DayHeader
+              date={date}
+              expanded={!isCollapsed}
+              onToggle={() => toggleDay(date)}
+              summary={summary}
+              isToday={date === today}
+            />
 
-            <div className="mt-2 space-y-2">
-              <DayNotesEditor
-                initialValue={noteFor(date)}
-                onSave={(v) => onSaveDayNote(date, v)}
-                readOnly={readOnly}
-              />
-
-              {continuing.map((s) => (
-                <SpanBanner
-                  key={`cont-${s.item.id}-${date}`}
-                  span={s}
-                  label={s.kind === 'lodging' ? 'stay continues' : 'rental continues'}
+            {!isCollapsed && (
+              <div className="mt-2 space-y-2">
+                <DayNotesEditor
+                  initialValue={noteFor(date)}
+                  onSave={(v) => onSaveDayNote(date, v)}
+                  readOnly={readOnly}
                 />
-              ))}
 
-              {endsToday.map((s) => (
-                <SpanBanner
-                  key={`end-${s.item.id}-${date}`}
-                  span={s}
-                  label={SPAN_STYLE[s.kind].end}
-                />
-              ))}
-
-              {dayItems.map((item) => (
-                <div key={item.id} className="relative">
-                  {/* item dot on the spine */}
-                  <span
-                    aria-hidden
-                    className={`absolute -left-[26px] top-[18px] h-2.5 w-2.5 rounded-full ring-2 ring-slate-50 ${TYPE_DOT[item.type]}`}
+                {continuing.map((s) => (
+                  <SpanBanner
+                    key={`cont-${s.item.id}-${date}`}
+                    span={s}
+                    label={s.kind === 'lodging' ? 'stay continues' : 'rental continues'}
                   />
-                  <ItemCard
-                    item={item}
-                    travelers={travelers}
-                    onDelete={() => onDeleteItem(item)}
-                    onUpdate={
-                      onUpdateItem
-                        ? (body) => onUpdateItem(item, body)
-                        : undefined
-                    }
-                    readOnly={readOnly}
-                  />
-                </div>
-              ))}
+                ))}
 
-              {dayItems.length === 0 &&
-                continuing.length === 0 &&
-                endsToday.length === 0 &&
-                !noteFor(date) && (
-                  <p className="text-xs text-slate-400">No items.</p>
-                )}
-            </div>
+                {endsToday.map((s) => (
+                  <SpanBanner
+                    key={`end-${s.item.id}-${date}`}
+                    span={s}
+                    label={SPAN_STYLE[s.kind].end}
+                  />
+                ))}
+
+                {dayItems.map((item) => (
+                  <div key={item.id} className="relative">
+                    {/* item dot on the spine */}
+                    <span
+                      aria-hidden
+                      className={`absolute -left-[26px] top-[18px] h-2.5 w-2.5 rounded-full ring-2 ring-slate-50 ${TYPE_DOT[item.type]}`}
+                    />
+                    <ItemCard
+                      item={item}
+                      travelers={travelers}
+                      onDelete={() => onDeleteItem(item)}
+                      onUpdate={
+                        onUpdateItem
+                          ? (body) => onUpdateItem(item, body)
+                          : undefined
+                      }
+                      readOnly={readOnly}
+                    />
+                  </div>
+                ))}
+
+                {dayItems.length === 0 &&
+                  continuing.length === 0 &&
+                  endsToday.length === 0 &&
+                  !noteFor(date) && (
+                    <p className="text-xs text-slate-400">No items.</p>
+                  )}
+              </div>
+            )}
           </section>
         );
       })}
