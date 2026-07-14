@@ -47,6 +47,11 @@ export default function TripTodoList({ todos, onChange, readOnly }: Props) {
 
   if (readOnly && todos.length === 0) return null;
 
+  // Display-only: open items first, completed sink to the bottom. Sort is
+  // stable, so relative order within each group is preserved. Mutations key off
+  // the original `todos` array by id, so the stored order is unaffected.
+  const ordered = [...todos].sort((a, b) => Number(a.done) - Number(b.done));
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-700">To-do</h2>
@@ -58,7 +63,7 @@ export default function TripTodoList({ todos, onChange, readOnly }: Props) {
         )
       ) : (
         <ul className="mt-2 space-y-1">
-          {todos.map((t) => (
+          {ordered.map((t) => (
             <TodoRow
               key={t.id}
               todo={t}

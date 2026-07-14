@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Trip } from '../api/types';
@@ -8,6 +8,30 @@ export default function TripList() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<'upcoming' | 'past'>('upcoming');
+
+  // Local calendar date as YYYY-MM-DD so it compares lexically against the
+  // date-only start_date/end_date strings.
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }, []);
+
+  // A trip is "past" once it has fully ended; in-progress trips stay upcoming.
+  // Upcoming sorts soonest-first, previous sorts most-recent-first.
+  const { upcoming, past } = useMemo(() => {
+    const upcoming: Trip[] = [];
+    const past: Trip[] = [];
+    for (const t of trips) {
+      (t.end_date < todayStr ? past : upcoming).push(t);
+    }
+    upcoming.sort((a, b) => a.start_date.localeCompare(b.start_date));
+    past.sort((a, b) => b.start_date.localeCompare(a.start_date));
+    return { upcoming, past };
+  }, [trips, todayStr]);
+
+  const visible = view === 'past' ? past : upcoming;
 
   const reload = async () => {
     setLoading(true);
@@ -101,26 +125,72 @@ export default function TripList() {
       ) : trips.length === 0 ? (
         <p className="text-slate-500">No trips yet. Create your first one above.</p>
       ) : (
-        <ul className="space-y-2">
-          {trips.map((t) => (
-            <li
-              key={t.id}
-              className="rounded-xl border border-slate-200 bg-white shadow-sm hover:border-teal-300"
-            >
-              <Link to={`/trips/${t.id}`} className="block px-4 py-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-base font-semibold">{t.name}</span>
-                  <span className="text-sm tabular-nums text-slate-500">
-                    {t.start_date} → {t.end_date}
-                  </span>
-                </div>
-                {t.destination && (
-                  <p className="mt-1 text-sm text-slate-600">{t.destination}</p>
-                )}
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <>
+          {past.length > 0 && (
+            <div className="flex w-fit gap-1 rounded-lg bg-slate-100 p-1 text-sm">
+              <button
+                onClick={() => setView('upcoming')}
+                className={`rounded-md px-3 py-1 font-medium ${
+                  view === 'upcoming'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Upcoming{upcoming.length > 0 ? ` (${upcoming.length})` : ''}
+              </button>
+              <button
+                onClick={() => setView('past')}
+                className={`rounded-md px-3 py-1 font-medium ${
+                  view === 'past'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Previous ({past.length})
+              </button>
+            </div>
+          )}
+
+          {visible.length === 0 ? (
+            <p className="text-slate-500">
+              {view === 'past' ? 'No previous trips.' : 'No upcoming trips.'}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {visible.map((t) => {
+                const openTodos = t.todos.filter((td) => !td.done).length;
+                return (
+                  <li
+                    key={t.id}
+                    className="rounded-xl border border-slate-200 bg-white shadow-sm hover:border-teal-300"
+                  >
+                    <Link to={`/trips/${t.id}`} className="block px-4 py-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="flex items-baseline gap-2">
+                          <span className="text-base font-semibold">{t.name}</span>
+                          {openTodos > 0 && (
+                            <span
+                              className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+                              title={`${openTodos} open to-do${openTodos === 1 ? '' : 's'}`}
+                            >
+                              {openTodos} to-do{openTodos === 1 ? '' : 's'}
+                            </span>
+                          )}
+                        </span>
+                        <span className="whitespace-nowrap text-sm tabular-nums text-slate-500">
+                          {t.start_date} → {t.end_date}
+                        </span>
+                      </div>
+                      {t.destination && (
+                        <p className="mt-1 text-sm text-slate-600">{t.destination}</p>
+                      )}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );
