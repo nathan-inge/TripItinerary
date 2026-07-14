@@ -19,7 +19,8 @@ pub enum ParseBackend {
 pub struct Config {
     pub database_url: String,
     pub bind_addr: String,
-    pub owner_email: String,
+    /// Allow-list of owner emails, lowercased. Guaranteed non-empty.
+    pub owner_emails: Vec<String>,
     pub cf_access_team_domain: Option<String>,
     pub cf_access_aud: Option<String>,
     pub dev_bypass_auth: bool,
@@ -41,8 +42,7 @@ impl Config {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| default_db_url());
         let bind_addr =
             std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:5050".to_string());
-        let owner_email =
-            std::env::var("OWNER_EMAIL").unwrap_or_else(|_| "nate8983@gmail.com".to_string());
+        let owner_emails = parse_owner_emails(std::env::var("OWNER_EMAIL").ok())?;
         let cf_access_team_domain = std::env::var("CF_ACCESS_TEAM_DOMAIN").ok();
         let cf_access_aud = std::env::var("CF_ACCESS_AUD").ok();
         let dev_bypass_auth = std::env::var("DEV_BYPASS_AUTH")
@@ -130,7 +130,7 @@ impl Config {
         Ok(Self {
             database_url,
             bind_addr,
-            owner_email,
+            owner_emails,
             cf_access_team_domain,
             cf_access_aud,
             dev_bypass_auth,
@@ -143,6 +143,37 @@ impl Config {
             email_hmac_key,
         })
     }
+
+    /// True if `email` (any case) is in the configured owner allow-list.
+    pub fn is_owner(&self, email: &str) -> bool {
+        let e = email.to_ascii_lowercase();
+        self.owner_emails.iter().any(|o| *o == e)
+    }
+
+    /// The first configured owner. Used as the injected identity when auth is
+    /// bypassed for local development. Safe to index: `owner_emails` is
+    /// guaranteed non-empty by [`parse_owner_emails`].
+    pub fn primary_owner(&self) -> &str {
+        &self.owner_emails[0]
+    }
+}
+
+/// Parse the `OWNER_EMAIL` env var into a non-empty, lowercased allow-list.
+/// Accepts a comma-separated list; fails closed if unset or empty so a
+/// misconfigured deploy never silently falls back to a default owner.
+fn parse_owner_emails(raw: Option<String>) -> Result<Vec<String>> {
+    let raw = raw.ok_or_else(|| {
+        anyhow!("OWNER_EMAIL must be set (comma-separated list of allowed owner emails)")
+    })?;
+    let emails: Vec<String> = raw
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if emails.is_empty() {
+        return Err(anyhow!("OWNER_EMAIL is set but contains no valid addresses"));
+    }
+    Ok(emails)
 }
 
 fn default_db_url() -> String {
@@ -155,4 +186,28 @@ fn default_data_dir() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".tripit"))
         .unwrap_or_else(|| PathBuf::from(".tripit"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_emails_required() {
+        assert!(parse_owner_emails(None).is_err());
+        assert!(parse_owner_emails(Some("".into())).is_err());
+        assert!(parse_owner_emails(Some("  ,  ".into())).is_err());
+    }
+
+    #[test]
+    fn owner_emails_parsed_trimmed_and_lowercased() {
+        let e = parse_owner_emails(Some("  Owner@Example.COM ".into())).unwrap();
+        assert_eq!(e, vec!["owner@example.com"]);
+    }
+
+    #[test]
+    fn owner_emails_comma_separated_drops_blanks() {
+        let e = parse_owner_emails(Some("a@x.com, ,B@X.com,".into())).unwrap();
+        assert_eq!(e, vec!["a@x.com", "b@x.com"]);
+    }
 }

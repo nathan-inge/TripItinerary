@@ -301,15 +301,17 @@ back to the previous covered night's tz, then to the trip's first-known tz.
 - JWKS URL: `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`,
   cached for 1h.
 - Allowed `aud` = the CF Access app's AUD tag (env: `CF_ACCESS_AUD`).
-- Map `email` claim to `owner_email`. Reject if not in the allowlist
-  (single value in env `OWNER_EMAIL`).
+- Reject unless the `email` claim is in the owner allow-list (env
+  `OWNER_EMAIL`, a required comma-separated list; the app refuses to start
+  if it is unset).
 
 ### 7.2 Cloudflare Access policies on the hostname
 Configure in the CF dashboard, in order:
 1. **Allow** path `/api/intake/email` to service token "tripit-email-worker".
 2. **Bypass** path `/share/*` and `/api/share/*` (the app itself does token
    auth).
-3. **Allow** everything else to email `nate8983@gmail.com`.
+3. **Allow** everything else to the owner email(s) — keep this set in sync
+   with `OWNER_EMAIL`.
 
 ### 7.3 Share token format
 - Mint: 32 random bytes → URL-safe base64 → 43-char token.
@@ -450,7 +452,7 @@ TECH_SPEC.md
 | `BIND_ADDR`               | `127.0.0.1:5050`                                 | Different from CTO's :5000                |
 | `CF_ACCESS_TEAM_DOMAIN`   | e.g. `nathan.cloudflareaccess.com`               | For JWKS fetch                            |
 | `CF_ACCESS_AUD`           | (required)                                       | App AUD tag                               |
-| `OWNER_EMAIL`             | `nate8983@gmail.com`                             | Single allowed owner                      |
+| `OWNER_EMAIL`             | (required)                                       | Comma-separated owner allow-list          |
 | `ANTHROPIC_API_KEY`       | (required)                                       |                                           |
 | `TRIPIT_PARSE_MODEL`      | `claude-sonnet-4-6`                              | Override per-request also possible        |
 | `TRIPIT_DAILY_TOKEN_CAP`  | `200000`                                         | Fail-closed safety cap                    |

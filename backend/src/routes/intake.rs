@@ -105,11 +105,16 @@ pub async fn intake(
 
     // Step 4: find trip whose normalized name matches. Hand-rolled to avoid
     // pulling in case-insensitive collation; trip lists are small (1s-10s).
-    let trips: Vec<(String, String)> =
-        sqlx::query_as("SELECT id, name FROM trips WHERE owner_email = ?1")
-            .bind(&state.cfg.owner_email)
-            .fetch_all(&state.pool)
-            .await?;
+    let placeholders = (1..=state.cfg.owner_emails.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!("SELECT id, name FROM trips WHERE owner_email IN ({placeholders})");
+    let mut query = sqlx::query_as::<_, (String, String)>(&sql);
+    for email in &state.cfg.owner_emails {
+        query = query.bind(email);
+    }
+    let trips: Vec<(String, String)> = query.fetch_all(&state.pool).await?;
     let Some(matched) = trips
         .into_iter()
         .find(|(_id, name)| normalize(name) == hint_norm)

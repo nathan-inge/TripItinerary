@@ -111,7 +111,7 @@ One policy:
 |----------|---------------------------------------------|
 | Name     | `Owner`                                     |
 | Action   | **Allow**                                   |
-| Include  | **Emails** → `nate8983@gmail.com`           |
+| Include  | **Emails** → one or more owner addresses    |
 
 Cloudflare matches the most-specific path first, so the App 1 paths
 (share routes + static assets) hit Bypass; everything else on the
@@ -135,7 +135,10 @@ mkdir -p ~/.config/tripit
 cat > ~/.config/tripit/env <<'EOF'
 CF_ACCESS_TEAM_DOMAIN=<your-team>.cloudflareaccess.com
 CF_ACCESS_AUD=<App 2 AUD from step 3>
-OWNER_EMAIL=nate8983@gmail.com
+# Required. Comma-separated allow-list; each must match a CF Access JWT email
+# claim. The app refuses to start if this is unset.
+OWNER_EMAIL=you@example.com
+# e.g. two owners: OWNER_EMAIL=you@example.com,partner@example.com
 
 # Pick a parse backend (or omit to skip auto-extraction entirely — paste/
 # forward will store the raw text and you fill fields by hand).

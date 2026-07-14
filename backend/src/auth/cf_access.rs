@@ -82,7 +82,7 @@ pub async fn require_owner(
 ) -> Result<Response, AppError> {
     if state.cfg.dev_bypass_auth {
         req.extensions_mut().insert(OwnerIdentity {
-            email: state.cfg.owner_email.clone(),
+            email: state.cfg.primary_owner().to_string(),
         });
         return Ok(next.run(req).await);
     }
@@ -110,8 +110,11 @@ pub async fn require_owner(
             AppError::Unauthorized
         })?;
 
-    if identity.email.to_ascii_lowercase() != state.cfg.owner_email.to_ascii_lowercase() {
-        tracing::warn!("CF Access JWT email {} != owner", identity.email);
+    if !state.cfg.is_owner(&identity.email) {
+        tracing::warn!(
+            "CF Access JWT email {} not in owner allow-list",
+            identity.email
+        );
         return Err(AppError::Forbidden);
     }
 
