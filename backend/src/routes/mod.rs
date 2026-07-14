@@ -3,6 +3,7 @@ pub mod email_senders;
 pub mod health;
 pub mod intake;
 pub mod items;
+pub mod me;
 pub mod share;
 pub mod shared;
 pub mod travelers;
@@ -19,6 +20,7 @@ pub fn api_router(state: AppState) -> Router {
 
     // Owner routes — CF Access JWT (or DEV_BYPASS_AUTH=1).
     let owner = Router::new()
+        .merge(me::router())
         .merge(trips::router())
         .merge(travelers::router())
         .merge(items::router())

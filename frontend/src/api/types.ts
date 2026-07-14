@@ -8,6 +8,10 @@ export interface TodoItem {
   done: boolean;
 }
 
+export interface Me {
+  email: string;
+}
+
 export interface Trip {
   id: string;
   owner_email: string;

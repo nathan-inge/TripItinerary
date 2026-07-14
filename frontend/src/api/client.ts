@@ -6,6 +6,7 @@ import type {
   CreatedShareLink,
   DayNote,
   Item,
+  Me,
   ParseTextResponse,
   ShareLink,
   SharedTripDetail,
@@ -53,6 +54,7 @@ async function req<T>(
 }
 
 export const api = {
+  getMe: () => req<Me>('/me'),
   listTrips: () => req<Trip[]>('/trips'),
   getTrip: (id: string) => req<TripDetail>(`/trips/${id}`),
   createTrip: (body: CreateTrip) =>
