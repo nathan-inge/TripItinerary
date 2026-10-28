@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::FromRow;
 use utoipa::ToSchema;
 
-use super::{DayNote, Item, Traveler, TripEmailSender};
+use super::{DayNote, Item, Traveler, TripEmailSender, TripRole};
 
 /// Deserialize `Option<Option<T>>` such that an explicit `null` → `Some(None)`
 /// (meaning "clear this field") and an absent key → `None` ("leave alone").
@@ -74,6 +74,15 @@ impl From<TripRow> for Trip {
     }
 }
 
+/// One row of `GET /trips` — the trip plus the caller's effective role, so the
+/// home page can label and gate trips shared with them.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TripSummary {
+    #[serde(flatten)]
+    pub trip: Trip,
+    pub my_role: TripRole,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TripDetail {
     #[serde(flatten)]
@@ -81,7 +90,10 @@ pub struct TripDetail {
     pub travelers: Vec<Traveler>,
     pub items: Vec<Item>,
     pub day_notes: Vec<DayNote>,
+    /// Owner-level config; empty for members and share-link guests.
     pub email_senders: Vec<TripEmailSender>,
+    /// The caller's access to this trip, so the UI can hide what they can't do.
+    pub my_role: TripRole,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

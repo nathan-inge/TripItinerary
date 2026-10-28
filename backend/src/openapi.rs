@@ -13,13 +13,19 @@ use utoipa::OpenApi;
         title = "TripItinerary",
         version = "0.1.0",
         description = "Self-hosted trip itinerary API. \
-                       Authenticate as the owner via Cloudflare Access JWT in \
-                       the `Cf-Access-Jwt-Assertion` header, or as a guest via \
-                       a share token in the URL path (`/api/share/<token>/...`)."
+                       Authenticate as a signed-in identity via Cloudflare \
+                       Access JWT in the `Cf-Access-Jwt-Assertion` header \
+                       (owner, or a trip member added by email), or as a guest \
+                       via a share token in the URL path \
+                       (`/api/share/<token>/...`)."
     ),
     components(schemas(
         crate::models::Trip,
         crate::models::TripDetail,
+        crate::models::TripSummary,
+        crate::models::TripRole,
+        crate::models::TripMember,
+        crate::models::UpsertTripMember,
         crate::models::CreateTrip,
         crate::models::UpdateTrip,
         crate::models::TodoItem,

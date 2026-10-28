@@ -10,6 +10,9 @@ export interface TodoItem {
 
 export interface Me {
   email: string;
+  /** False when signed in through Cloudflare Access but with no access in the
+   *  app yet — nothing has been shared with this address. */
+  provisioned: boolean;
 }
 
 export interface Trip {
@@ -25,6 +28,27 @@ export interface Trip {
   todos: TodoItem[];
   created_at: string;
   updated_at: string;
+}
+
+/** The caller's access to a trip. `owner` holds the trip; `edit`/`view` come
+ *  from an email-share membership (or, for guests, the share-link scope). */
+export type TripRole = 'owner' | 'edit' | 'view';
+
+/** A row of GET /trips — a trip plus the caller's role on it. */
+export interface TripSummary extends Trip {
+  my_role: TripRole;
+}
+
+export interface TripMember {
+  trip_id: string;
+  email: string;
+  role: ShareScope;
+  created_at: string;
+}
+
+export interface UpsertTripMember {
+  email: string;
+  role: ShareScope;
 }
 
 export interface Traveler {
@@ -76,7 +100,9 @@ export interface TripDetail extends Trip {
   travelers: Traveler[];
   items: Item[];
   day_notes: DayNote[];
+  /** Owner-only config; empty for members and share-link guests. */
   email_senders: TripEmailSender[];
+  my_role: TripRole;
 }
 
 export interface CreateTrip {

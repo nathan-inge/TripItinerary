@@ -5,10 +5,10 @@ use axum::{
 };
 use chrono::Utc;
 
-use crate::auth::OwnerIdentity;
+use crate::auth::Identity;
 use crate::error::AppResult;
 use crate::models::{DayNote, UpsertDayNote};
-use crate::routes::trips::require_trip_access;
+use crate::routes::trips::{require_trip_access, require_trip_edit};
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -19,10 +19,10 @@ pub fn router() -> Router<AppState> {
 
 pub async fn list_notes(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path(trip_id): Path<String>,
 ) -> AppResult<Json<Vec<DayNote>>> {
-    require_trip_access(&state, &trip_id, &owner.email).await?;
+    require_trip_access(&state.pool, &trip_id, &me.email).await?;
     let rows: Vec<DayNote> =
         sqlx::query_as("SELECT * FROM day_notes WHERE trip_id = ?1 ORDER BY date")
             .bind(&trip_id)
@@ -33,11 +33,11 @@ pub async fn list_notes(
 
 pub async fn upsert_note(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path((trip_id, date)): Path<(String, String)>,
     Json(payload): Json<UpsertDayNote>,
 ) -> AppResult<Json<DayNote>> {
-    require_trip_access(&state, &trip_id, &owner.email).await?;
+    require_trip_edit(&state.pool, &trip_id, &me.email).await?;
     let now = Utc::now().to_rfc3339();
 
     if payload.notes_md.is_empty() {

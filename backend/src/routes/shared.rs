@@ -16,7 +16,7 @@ use crate::auth::ScopedAccess;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     CreateItem, DayNote, Item, ItemPreview, ParseTextRequest, ParseTextResponse, ShareScope,
-    SharedTripDetail, Traveler, Trip, TripDetail, UpdateItem, UpdateTrip, UpsertDayNote,
+    SharedTripDetail, Traveler, Trip, TripDetail, TripRole, UpdateItem, UpdateTrip, UpsertDayNote,
 };
 use crate::config::ParseBackend;
 use crate::parse::dry_run::{log_dry_run, log_llm_input};
@@ -113,6 +113,11 @@ async fn get_trip(
             day_notes,
             // Email-sender allow-list is owner-level config; guests don't see it.
             email_senders: vec![],
+            // Mirrors `share_scope` — a token bearer is never a trip owner.
+            my_role: match access.scope {
+                ShareScope::Edit => TripRole::Edit,
+                ShareScope::View => TripRole::View,
+            },
         },
         share_scope: access.scope,
     }))
@@ -124,7 +129,7 @@ async fn update_trip(
     Json(payload): Json<UpdateTrip>,
 ) -> AppResult<Json<Trip>> {
     require_edit(&access)?;
-    crate::routes::trips::apply_update(&state.pool, &access.trip_id, None, payload).await?;
+    crate::routes::trips::apply_update(&state.pool, &access.trip_id, payload).await?;
     let trip = crate::routes::trips::fetch_trip_unscoped(&state.pool, &access.trip_id).await?;
     Ok(Json(trip))
 }

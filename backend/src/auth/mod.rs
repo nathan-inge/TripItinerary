@@ -1,7 +1,7 @@
 pub mod cf_access;
 pub mod share_token;
 
-pub use cf_access::{require_owner, OwnerIdentity};
+pub use cf_access::{require_identity, require_provisioned, Identity};
 
 use crate::models::ShareScope;
 

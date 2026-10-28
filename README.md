@@ -2,8 +2,9 @@
 
 Self-hosted trip itinerary webapp. Drops every booking confirmation into one
 chronological per-trip view, flags obvious holes (uncovered nights, missing
-inbound/outbound), and lets you share trips with travel companions via
-unguessable links.
+inbound/outbound), and lets you share trips with travel companions — either
+by their own email, so the trip shows up on their home page, or via an
+unguessable link for anyone who shouldn't need an account.
 
 Sibling to [ContextualTaskOrganizer](../ContextualTaskOrganizer) — same single-
 binary deploy shape, served at `travel.nathaninge.com` behind Cloudflare Access.
@@ -47,7 +48,7 @@ Configuration lives in `~/.config/tripit/env`; see [`.env.example`](./.env.examp
 | Backend  | Rust + axum + sqlx (sqlite) + tokio + utoipa                    |
 | Database | SQLite (WAL, FK on) at `~/.tripit/db.sqlite`                    |
 | Frontend | React 18, Vite, TypeScript, Tailwind, React Router, vite-pwa    |
-| Auth     | Cloudflare Access JWT + opaque per-trip share tokens            |
+| Auth     | Cloudflare Access JWT (+ per-trip email membership) and opaque share tokens |
 | Parsing  | Anthropic Claude (Sonnet 4.6 default) — server-side             |
 
 ## Layout
@@ -73,5 +74,7 @@ ops/       systemd unit, cloudflared example, deploy.sh, email-worker (M5)
 ## API
 
 REST under `/api`. Health is unauthenticated; everything else needs either a
-Cloudflare Access JWT (owner) or a share token in the URL (guests). The
-OpenAPI 3 spec is published at `/api/openapi.json`.
+Cloudflare Access JWT (the trip's owner, or an address it's been shared with)
+or a share token in the URL (guests). Each trip response carries `my_role` —
+`owner`, `edit`, or `view` — which is what the UI gates on. The OpenAPI 3 spec
+is published at `/api/openapi.json`.

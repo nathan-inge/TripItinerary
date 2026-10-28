@@ -63,9 +63,10 @@ export default function ShareLinkManager({ tripId }: Props) {
   return (
     <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div>
-        <h2 className="text-lg font-semibold">Share</h2>
+        <h2 className="text-lg font-semibold">Share links</h2>
         <p className="text-xs text-slate-500">
-          Anyone with the link gets access at the chosen scope. Revoke anytime.
+          Anyone with the link gets access at the chosen scope, no account
+          needed. Revoke anytime.
         </p>
       </div>
 

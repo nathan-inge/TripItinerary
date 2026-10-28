@@ -7,7 +7,7 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use crate::auth::OwnerIdentity;
+use crate::auth::Identity;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     CreateItem, Item, ItemPreview, ItemSource, ItemType, Link, ParseStatus,
@@ -17,7 +17,7 @@ use crate::config::ParseBackend;
 use crate::parse::dry_run::{log_dry_run, log_llm_input};
 use crate::parse::prompt::estimate_tokens;
 use crate::parse::redact::{lookup_conf_placeholder, redact_for_remote};
-use crate::routes::trips::require_trip_access;
+use crate::routes::trips::{require_trip_access, require_trip_edit};
 use crate::AppState;
 
 /// Load traveler names for a trip — needed to redact them out of bodies
@@ -82,11 +82,11 @@ pub fn router() -> Router<AppState> {
 
 pub async fn parse_text(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path(trip_id): Path<String>,
     Json(payload): Json<ParseTextRequest>,
 ) -> AppResult<Json<ParseTextResponse>> {
-    require_trip_access(&state, &trip_id, &owner.email).await?;
+    require_trip_edit(&state.pool, &trip_id, &me.email).await?;
 
     let raw_text = payload.raw_text.trim();
     if raw_text.is_empty() {
@@ -277,11 +277,11 @@ pub async fn list_for_trip(pool: &SqlitePool, trip_id: &str) -> AppResult<Vec<It
 
 pub async fn create_item(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path(trip_id): Path<String>,
     Json(payload): Json<CreateItem>,
 ) -> AppResult<Json<Item>> {
-    require_trip_access(&state, &trip_id, &owner.email).await?;
+    require_trip_edit(&state.pool, &trip_id, &me.email).await?;
     if payload.title.trim().is_empty() {
         return Err(AppError::BadRequest("title required".into()));
     }
@@ -338,20 +338,20 @@ pub async fn create_item(
 
 pub async fn get_item(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Item>> {
-    let row = fetch_item_row(&state, &id, &owner.email).await?;
+    let row = fetch_item_row(&state, &id, &me.email, false).await?;
     Ok(Json(hydrate(&state.pool, row).await?))
 }
 
 pub async fn update_item(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateItem>,
 ) -> AppResult<Json<Item>> {
-    let mut row = fetch_item_row(&state, &id, &owner.email).await?;
+    let mut row = fetch_item_row(&state, &id, &me.email, true).await?;
     if let Some(t) = payload.item_type {
         row.type_ = t.as_str().to_string();
     }
@@ -434,10 +434,10 @@ pub async fn update_item(
 
 pub async fn delete_item(
     State(state): State<AppState>,
-    axum::extract::Extension(owner): axum::extract::Extension<OwnerIdentity>,
+    axum::extract::Extension(me): axum::extract::Extension<Identity>,
     Path(id): Path<String>,
 ) -> AppResult<axum::http::StatusCode> {
-    let _ = fetch_item_row(&state, &id, &owner.email).await?;
+    let _ = fetch_item_row(&state, &id, &me.email, true).await?;
     sqlx::query("DELETE FROM items WHERE id=?1")
         .bind(&id)
         .execute(&state.pool)
@@ -445,17 +445,26 @@ pub async fn delete_item(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-async fn fetch_item_row(state: &AppState, id: &str, owner_email: &str) -> AppResult<ItemRow> {
-    let row: Option<ItemRow> = sqlx::query_as(
-        "SELECT i.* FROM items i
-         JOIN trips t ON t.id = i.trip_id
-         WHERE i.id = ?1 AND t.owner_email = ?2",
-    )
-    .bind(id)
-    .bind(owner_email)
-    .fetch_optional(&state.pool)
-    .await?;
-    row.ok_or_else(|| AppError::NotFound(format!("item {} not found", id)))
+/// Load an item, then authorize the caller against its trip. `/items/:id`
+/// carries no trip id, so the row has to come first; the role resolver stays
+/// the single place access is decided.
+async fn fetch_item_row(
+    state: &AppState,
+    id: &str,
+    email: &str,
+    for_write: bool,
+) -> AppResult<ItemRow> {
+    let row: Option<ItemRow> = sqlx::query_as("SELECT * FROM items WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await?;
+    let row = row.ok_or_else(|| AppError::NotFound(format!("item {} not found", id)))?;
+    if for_write {
+        require_trip_edit(&state.pool, &row.trip_id, email).await?;
+    } else {
+        require_trip_access(&state.pool, &row.trip_id, email).await?;
+    }
+    Ok(row)
 }
 
 pub async fn fetch_item_unscoped(pool: &SqlitePool, id: &str) -> AppResult<Item> {

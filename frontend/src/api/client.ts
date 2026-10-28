@@ -13,7 +13,10 @@ import type {
   Traveler,
   Trip,
   TripDetail,
+  TripMember,
+  TripSummary,
   UpdateTrip,
+  UpsertTripMember,
 } from './types';
 
 async function req<T>(
@@ -55,7 +58,7 @@ async function req<T>(
 
 export const api = {
   getMe: () => req<Me>('/me'),
-  listTrips: () => req<Trip[]>('/trips'),
+  listTrips: () => req<TripSummary[]>('/trips'),
   getTrip: (id: string) => req<TripDetail>(`/trips/${id}`),
   createTrip: (body: CreateTrip) =>
     req<Trip>('/trips', { method: 'POST', body: JSON.stringify(body) }),
@@ -102,6 +105,20 @@ export const api = {
     }),
   revokeShareLink: (id: string) =>
     req<void>(`/share-links/${id}`, { method: 'DELETE' }, false),
+
+  listMembers: (tripId: string) =>
+    req<TripMember[]>(`/trips/${tripId}/members`),
+  upsertMember: (tripId: string, body: UpsertTripMember) =>
+    req<TripMember>(`/trips/${tripId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  removeMember: (tripId: string, email: string) =>
+    req<void>(
+      `/trips/${tripId}/members/${encodeURIComponent(email)}`,
+      { method: 'DELETE' },
+      false,
+    ),
 
   addEmailSender: (tripId: string, email: string) =>
     req<{ trip_id: string; email: string; created_at: string }>(

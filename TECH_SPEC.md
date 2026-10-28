@@ -105,6 +105,18 @@ CREATE TABLE item_travelers (
   PRIMARY KEY (item_id, traveler_id)
 );
 
+-- Email-based sharing. A member authenticates as themselves through CF
+-- Access and sees the trip on their own home page; a share-link guest is
+-- anonymous and bearer-authed. `role` mirrors the share-link scopes.
+CREATE TABLE trip_members (
+  trip_id     TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  email       TEXT NOT NULL,             -- lowercase, trimmed
+  role        TEXT NOT NULL CHECK (role IN ('view','edit')),
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (trip_id, email)
+);
+CREATE INDEX idx_trip_members_email ON trip_members(email);
+
 CREATE TABLE share_links (
   id              TEXT PRIMARY KEY,
   trip_id         TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
@@ -169,9 +181,36 @@ A typed Rust enum (`ItemDetails`) deserializes from `details_json` based on
 
 Convention: REST under `/api`. JSON. OpenAPI at `/api/openapi.json` (utoipa).
 
-### 4.1 Owner-authenticated routes
+### 4.1 Identity-authenticated routes
 Cloudflare Access JWT is in the `Cf-Access-Jwt-Assertion` header; middleware
-verifies signature against the team's JWKS, checks `aud`, and pulls `email`.
+verifies signature against the team's JWKS, checks `aud`, and pulls `email`
+(lowercased).
+
+Two layers gate these routes:
+
+1. **`require_identity`** — verifies the JWT and attaches `Identity { email,
+   provisioned }`. `provisioned` is true when the address is in `OWNER_EMAIL`,
+   holds a `trip_members` row, or owns a trip. (That last clause keeps someone
+   who created their own trips from being locked out when their last
+   membership is revoked.)
+2. **`require_provisioned`** — 403s an authenticated address with no grant.
+   `/api/me` deliberately sits outside this layer so the SPA can explain
+   "nothing has been shared with you" instead of showing a bare error.
+
+Per-trip authorization is then one resolver, `trips::lookup_trip_role`, which
+returns the caller's **effective role**:
+
+| Role    | Source                        | Can                                                     |
+| ------- | ----------------------------- | ------------------------------------------------------- |
+| `owner` | `trips.owner_email`           | everything                                              |
+| `edit`  | `trip_members.role = 'edit'`  | trip content: items, day notes, todos, travelers, trip fields |
+| `view`  | `trip_members.role = 'view'`  | read only                                               |
+
+No access resolves to **404**, not 403, so a trip id can't be probed for
+existence. Owner-only surface: members, share links, email senders, deletion.
+`GET /api/trips` returns owned *and* shared trips, each tagged `my_role`;
+`GET /api/trips/:id` carries `my_role` too, and omits `email_senders` for
+non-owners.
 
 | Method | Path                                  | Purpose                              |
 | ------ | ------------------------------------- | ------------------------------------ |
@@ -188,9 +227,13 @@ verifies signature against the team's JWKS, checks `aud`, and pulls `email`.
 | DELETE | `/api/travelers/:id`                  | Remove                               |
 | GET    | `/api/trips/:id/day-notes`            | Map of `date → notes_md`             |
 | PUT    | `/api/trips/:id/day-notes/:date`      | Upsert day note (empty body clears)  |
-| GET    | `/api/trips/:id/share`                | List share links                     |
-| POST   | `/api/trips/:id/share`                | Mint a new share link (returns token *once*) |
-| DELETE | `/api/share/:id`                      | Revoke                               |
+| GET    | `/api/trips/:id/share`                | List share links (owner)             |
+| POST   | `/api/trips/:id/share`                | Mint a new share link (owner; returns token *once*) |
+| DELETE | `/api/share-links/:id`                | Revoke (owner)                       |
+| GET    | `/api/trips/:id/members`              | List email-share members (owner)     |
+| POST   | `/api/trips/:id/members`              | Add member or change role (owner; upsert on email) |
+| DELETE | `/api/trips/:id/members/:email`       | Remove member (owner)                |
+| GET    | `/api/me`                             | `{ email, provisioned }`             |
 | GET    | `/api/inbox`                          | List unassigned forwarded emails     |
 | POST   | `/api/inbox/:id/assign`               | Assign to trip (re-parse + insert)   |
 | DELETE | `/api/inbox/:id`                      | Discard                              |
@@ -210,7 +253,9 @@ Token is in the URL path; the backend does `sha256(token)` → `share_links` loo
 | GET    | `/api/share/:token/day-notes`         | view                          |
 | PUT    | `/api/share/:token/day-notes/:date`   | edit                          |
 
-Edit routes via share tokens cannot touch `share_links` or `owner_email`.
+Edit routes via share tokens cannot touch `share_links`, `trip_members`, or
+`owner_email`. The response carries `my_role` mirroring the token scope — a
+bearer is never an owner.
 
 ### 4.3 Service-token route (email worker only)
 | Method | Path                       | Purpose                              |
@@ -301,17 +346,24 @@ back to the previous covered night's tz, then to the trip's first-known tz.
 - JWKS URL: `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`,
   cached for 1h.
 - Allowed `aud` = the CF Access app's AUD tag (env: `CF_ACCESS_AUD`).
-- Reject unless the `email` claim is in the owner allow-list (env
-  `OWNER_EMAIL`, a required comma-separated list; the app refuses to start
-  if it is unset).
+- Reject unless the `email` claim is *provisioned*: in the owner allow-list
+  (env `OWNER_EMAIL`, a required comma-separated list; the app refuses to
+  start if it is unset), or holding a `trip_members` row, or owning a trip.
+  Cloudflare Access is the outer gate, but this app-level check stays so a
+  widened Access policy can't silently hand an unknown address an account.
+  `/api/me` is the one route an unprovisioned identity may call.
 
 ### 7.2 Cloudflare Access policies on the hostname
 Configure in the CF dashboard, in order:
 1. **Allow** path `/api/intake/email` to service token "tripit-email-worker".
 2. **Bypass** path `/share/*` and `/api/share/*` (the app itself does token
    auth).
-3. **Allow** everything else to the owner email(s) — keep this set in sync
-   with `OWNER_EMAIL`.
+3. **Allow** everything else to the owner email(s) **plus every address a
+   trip has been shared with by email**. Adding someone under Manage →
+   "Share with people" grants them inside the app; this policy is what lets
+   them reach it at all, so the two lists have to be kept in sync by hand.
+   `OWNER_EMAIL` itself only needs the bootstrap owner(s) — members are
+   recognized through `trip_members`.
 
 ### 7.3 Share token format
 - Mint: 32 random bytes → URL-safe base64 → 43-char token.
@@ -452,7 +504,7 @@ TECH_SPEC.md
 | `BIND_ADDR`               | `127.0.0.1:5050`                                 | Different from CTO's :5000                |
 | `CF_ACCESS_TEAM_DOMAIN`   | e.g. `nathan.cloudflareaccess.com`               | For JWKS fetch                            |
 | `CF_ACCESS_AUD`           | (required)                                       | App AUD tag                               |
-| `OWNER_EMAIL`             | (required)                                       | Comma-separated owner allow-list          |
+| `OWNER_EMAIL`             | (required)                                       | Comma-separated bootstrap owners; members come from `trip_members` |
 | `ANTHROPIC_API_KEY`       | (required)                                       |                                           |
 | `TRIPIT_PARSE_MODEL`      | `claude-sonnet-4-6`                              | Override per-request also possible        |
 | `TRIPIT_DAILY_TOKEN_CAP`  | `200000`                                         | Fail-closed safety cap                    |
@@ -519,6 +571,15 @@ PWA install, offline cache, mobile timeline refinements, OpenAPI publishing.
 - **Share-token leakage** via screenshots / Slack pastes is the user's
   responsibility; revocation is the only defense. Acceptable for a personal
   trip tool.
-- **Single owner.** Anchoring on `OWNER_EMAIL` keeps the model simple. If a
-  second owner ever needs in, that's a schema change (`trips.owner_email` →
-  `trip_owners` join), not a redesign.
+- **Per-trip membership** (`trip_members`) now sits alongside `OWNER_EMAIL`.
+  Each trip still has exactly one `owner_email`; sharing by email grants
+  `view`/`edit`, not co-ownership, so there is still one address that can
+  delete a trip or manage its guest list. Promoting a member to co-owner
+  would be the next schema change (`trips.owner_email` → `trip_owners`
+  join), and is deliberately not done.
+- **Two places to add a person.** An invited address must be on the
+  Cloudflare Access policy *and* in `trip_members`. The app can see only the
+  second, so someone added in-app but not at the edge is stopped at the SSO
+  login page with no in-app signal. Accepted: it keeps Cloudflare as a hard
+  gate rather than widening the policy to "any Google account" and leaning
+  on the app's allow-list alone.

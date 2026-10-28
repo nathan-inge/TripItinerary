@@ -9,6 +9,8 @@ interface Props {
   photosUrl: string | null;
   mapsUrl: string | null;
   onPatch: (patch: UpdateTrip) => void | Promise<void>;
+  /** View-only members see the same header without the edit affordances. */
+  readOnly?: boolean;
 }
 
 function isHttpUrl(s: string): boolean {
@@ -28,10 +30,15 @@ export default function TripHeader({
   photosUrl,
   mapsUrl,
   onPatch,
+  readOnly,
 }: Props) {
   return (
     <div className="space-y-2">
-      <EditableName value={name} onSave={(v) => onPatch({ name: v })} />
+      {readOnly ? (
+        <h1 className="text-2xl font-bold">{name}</h1>
+      ) : (
+        <EditableName value={name} onSave={(v) => onPatch({ name: v })} />
+      )}
       <p className="text-sm text-slate-600">
         {startDate} → {endDate}
         {destination && <> · {destination}</>}
@@ -42,12 +49,14 @@ export default function TripHeader({
           icon="📷"
           url={photosUrl}
           onSave={(v) => onPatch({ photos_url: v })}
+          readOnly={readOnly}
         />
         <UrlPill
           label="Map"
           icon="🗺"
           url={mapsUrl}
           onSave={(v) => onPatch({ maps_url: v })}
+          readOnly={readOnly}
         />
       </div>
     </div>
@@ -130,11 +139,13 @@ function UrlPill({
   icon,
   url,
   onSave,
+  readOnly,
 }: {
   label: string;
   icon: string;
   url: string | null;
   onSave: (next: string | null) => void | Promise<void>;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(url ?? '');
@@ -143,6 +154,22 @@ function UrlPill({
   useEffect(() => {
     setDraft(url ?? '');
   }, [url]);
+
+  // Read-only: the link still works, there's just nothing to add or change.
+  if (readOnly) {
+    if (!url) return null;
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800 hover:bg-teal-100"
+      >
+        <span aria-hidden>{icon}</span>
+        {label}
+      </a>
+    );
+  }
 
   if (editing) {
     const commit = async () => {

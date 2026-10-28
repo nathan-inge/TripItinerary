@@ -17,9 +17,17 @@ use crate::AppState;
 
 const JWT_HEADER: &str = "Cf-Access-Jwt-Assertion";
 
+/// A Cloudflare-Access-authenticated caller. `email` is lowercased so it
+/// compares cleanly against the `trip_members` / owner allow-lists.
+///
+/// `provisioned` means "this address is known to the app" — it is in
+/// `OWNER_EMAIL`, holds a `trip_members` row, or owns a trip. Cloudflare
+/// Access is the outer gate, but we keep this app-level check so a widened
+/// Access policy can't silently hand an unknown address a working account.
 #[derive(Clone, Debug)]
-pub struct OwnerIdentity {
+pub struct Identity {
     pub email: String,
+    pub provisioned: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,15 +82,20 @@ impl JwksClient {
     }
 }
 
-pub async fn require_owner(
+/// Verify the Access JWT and attach an [`Identity`]. Does *not* reject
+/// unprovisioned callers — `/api/me` is reachable without a grant so the SPA
+/// can tell a signed-in-but-not-invited person what's wrong. Every other
+/// authenticated route sits behind [`require_provisioned`].
+pub async fn require_identity(
     State(state): State<AppState>,
     headers: HeaderMap,
     mut req: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, AppError> {
     if state.cfg.dev_bypass_auth {
-        req.extensions_mut().insert(OwnerIdentity {
+        req.extensions_mut().insert(Identity {
             email: state.cfg.primary_owner().to_string(),
+            provisioned: true,
         });
         return Ok(next.run(req).await);
     }
@@ -103,23 +116,57 @@ pub async fn require_owner(
         .as_deref()
         .ok_or_else(|| AppError::Internal(anyhow!("CF_ACCESS_AUD not set")))?;
 
-    let identity = verify(&state.jwks_client, team, expected_aud, token)
+    let email = verify(&state.jwks_client, team, expected_aud, token)
         .await
         .map_err(|e| {
             tracing::warn!("CF Access JWT rejected: {e:#}");
             AppError::Unauthorized
         })?;
 
-    if !state.cfg.is_owner(&identity.email) {
+    let provisioned = is_provisioned(&state, &email).await?;
+    if !provisioned {
         tracing::warn!(
-            "CF Access JWT email {} not in owner allow-list",
-            identity.email
+            "CF Access JWT email {} has no owner-allow-list entry, trip membership, \
+             or owned trip; only /api/me is reachable",
+            email
         );
-        return Err(AppError::Forbidden);
     }
 
-    req.extensions_mut().insert(identity);
+    req.extensions_mut().insert(Identity { email, provisioned });
     Ok(next.run(req).await)
+}
+
+/// Gate for every authenticated route except `/api/me`.
+pub async fn require_provisioned(
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, AppError> {
+    let ok = req
+        .extensions()
+        .get::<Identity>()
+        .is_some_and(|i| i.provisioned);
+    if !ok {
+        return Err(AppError::Forbidden);
+    }
+    Ok(next.run(req).await)
+}
+
+/// True if the app knows this address: configured owner, member of some trip,
+/// or the owner of a trip it created itself. The last clause matters — without
+/// it, revoking someone's last membership would also lock them out of trips
+/// they own.
+async fn is_provisioned(state: &AppState, email: &str) -> Result<bool, sqlx::Error> {
+    if state.cfg.is_owner(email) {
+        return Ok(true);
+    }
+    let row: (i64,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM trip_members WHERE email = ?1)
+             OR EXISTS(SELECT 1 FROM trips WHERE lower(owner_email) = ?1)",
+    )
+    .bind(email)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(row.0 != 0)
 }
 
 async fn verify(
@@ -127,7 +174,7 @@ async fn verify(
     team_domain: &str,
     expected_aud: &str,
     token: &str,
-) -> Result<OwnerIdentity> {
+) -> Result<String> {
     let header = decode_header(token)?;
     let kid = header.kid.ok_or_else(|| anyhow!("missing kid"))?;
     let keys = jwks.keys(team_domain).await?;
@@ -146,7 +193,5 @@ async fn verify(
     if data.claims.email.is_empty() {
         return Err(anyhow!("email claim missing"));
     }
-    Ok(OwnerIdentity {
-        email: data.claims.email,
-    })
+    Ok(data.claims.email.to_ascii_lowercase())
 }

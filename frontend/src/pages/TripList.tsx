@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Trip } from '../api/types';
+import type { TripSummary } from '../api/types';
 
 export default function TripList() {
-  const [trips, setTrips] = useState<Trip[]>([]);
+  const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +21,8 @@ export default function TripList() {
   // A trip is "past" once it has fully ended; in-progress trips stay upcoming.
   // Upcoming sorts soonest-first, previous sorts most-recent-first.
   const { upcoming, past } = useMemo(() => {
-    const upcoming: Trip[] = [];
-    const past: Trip[] = [];
+    const upcoming: TripSummary[] = [];
+    const past: TripSummary[] = [];
     for (const t of trips) {
       (t.end_date < todayStr ? past : upcoming).push(t);
     }
@@ -168,6 +168,16 @@ export default function TripList() {
                       <div className="flex items-baseline justify-between gap-3">
                         <span className="flex items-baseline gap-2">
                           <span className="text-base font-semibold">{t.name}</span>
+                          {t.my_role !== 'owner' && (
+                            <span
+                              className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800"
+                              title={`Shared with you by ${t.owner_email} · ${
+                                t.my_role === 'edit' ? 'you can edit' : 'view only'
+                              }`}
+                            >
+                              shared{t.my_role === 'view' ? ' · view' : ''}
+                            </span>
+                          )}
                           {openTodos > 0 && (
                             <span
                               className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
@@ -183,6 +193,11 @@ export default function TripList() {
                       </div>
                       {t.destination && (
                         <p className="mt-1 text-sm text-slate-600">{t.destination}</p>
+                      )}
+                      {t.my_role !== 'owner' && (
+                        <p className="mt-1 truncate text-xs text-slate-500">
+                          from {t.owner_email}
+                        </p>
                       )}
                     </Link>
                   </li>

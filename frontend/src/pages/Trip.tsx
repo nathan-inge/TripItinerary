@@ -73,6 +73,10 @@ export default function TripPage() {
     );
   }
 
+  // View members read the itinerary but change nothing. Owners and edit
+  // members get the same content affordances; only Manage differs.
+  const canEdit = data.my_role !== 'view';
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -88,65 +92,82 @@ export default function TripPage() {
             photosUrl={data.photos_url}
             mapsUrl={data.maps_url}
             onPatch={patchTrip}
+            readOnly={!canEdit}
           />
+          {data.my_role !== 'owner' && (
+            <p className="mt-1 text-xs text-slate-500">
+              Shared by {data.owner_email} ·{' '}
+              {canEdit ? 'you can edit' : 'view only'}
+            </p>
+          )}
         </div>
-        <Link
-          to={`/trips/${data.id}/manage`}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-        >
-          Manage
-        </Link>
+        {canEdit && (
+          <Link
+            to={`/trips/${data.id}/manage`}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Manage
+          </Link>
+        )}
       </div>
 
-      <TripTodoList todos={data.todos} onChange={handleTodosChange} />
+      <TripTodoList
+        todos={data.todos}
+        onChange={handleTodosChange}
+        readOnly={!canEdit}
+      />
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() =>
-            setAddMode((m) => (m === 'paste' ? 'closed' : 'paste'))
-          }
-          className={`rounded-lg px-3 py-2 text-sm font-medium ${
-            addMode === 'paste'
-              ? 'bg-slate-200 text-slate-700'
-              : 'bg-teal-600 text-white hover:bg-teal-700'
-          }`}
-        >
-          {addMode === 'paste' ? 'Cancel' : '📋 Paste confirmation'}
-        </button>
-        <button
-          onClick={() =>
-            setAddMode((m) => (m === 'manual' ? 'closed' : 'manual'))
-          }
-          className={`rounded-lg px-3 py-2 text-sm font-medium ${
-            addMode === 'manual'
-              ? 'bg-slate-200 text-slate-700'
-              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
-          }`}
-        >
-          {addMode === 'manual' ? 'Cancel' : '+ Add manually'}
-        </button>
-      </div>
+      {canEdit && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() =>
+                setAddMode((m) => (m === 'paste' ? 'closed' : 'paste'))
+              }
+              className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                addMode === 'paste'
+                  ? 'bg-slate-200 text-slate-700'
+                  : 'bg-teal-600 text-white hover:bg-teal-700'
+              }`}
+            >
+              {addMode === 'paste' ? 'Cancel' : '📋 Paste confirmation'}
+            </button>
+            <button
+              onClick={() =>
+                setAddMode((m) => (m === 'manual' ? 'closed' : 'manual'))
+              }
+              className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                addMode === 'manual'
+                  ? 'bg-slate-200 text-slate-700'
+                  : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              {addMode === 'manual' ? 'Cancel' : '+ Add manually'}
+            </button>
+          </div>
 
-      <EmailIntakeHint tripId={data.id} tripName={data.name} />
+          <EmailIntakeHint tripId={data.id} tripName={data.name} />
 
-      {addMode === 'paste' && id && (
-        <PasteParseForm
-          tripId={id}
-          travelers={data.travelers}
-          onCancel={() => setAddMode('closed')}
-          onSaved={async () => {
-            setAddMode('closed');
-            await load();
-          }}
-        />
-      )}
+          {addMode === 'paste' && id && (
+            <PasteParseForm
+              tripId={id}
+              travelers={data.travelers}
+              onCancel={() => setAddMode('closed')}
+              onSaved={async () => {
+                setAddMode('closed');
+                await load();
+              }}
+            />
+          )}
 
-      {addMode === 'manual' && (
-        <AddItemForm
-          travelers={data.travelers}
-          onCancel={() => setAddMode('closed')}
-          onSubmit={handleAdd}
-        />
+          {addMode === 'manual' && (
+            <AddItemForm
+              travelers={data.travelers}
+              onCancel={() => setAddMode('closed')}
+              onSubmit={handleAdd}
+            />
+          )}
+        </>
       )}
 
       <Timeline
@@ -155,7 +176,8 @@ export default function TripPage() {
         dayNotes={data.day_notes}
         onSaveDayNote={handleSaveDayNote}
         onDeleteItem={handleDeleteItem}
-        onUpdateItem={handleUpdateItem}
+        onUpdateItem={canEdit ? handleUpdateItem : undefined}
+        readOnly={!canEdit}
       />
     </div>
   );

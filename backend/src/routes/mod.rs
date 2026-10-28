@@ -4,6 +4,7 @@ pub mod health;
 pub mod intake;
 pub mod items;
 pub mod me;
+pub mod members;
 pub mod share;
 pub mod shared;
 pub mod travelers;
@@ -18,18 +19,30 @@ pub fn api_router(state: AppState) -> Router {
     // Health is unauthenticated (used by deploys / curl checks).
     let public = Router::new().merge(health::router());
 
-    // Owner routes — CF Access JWT (or DEV_BYPASS_AUTH=1).
-    let owner = Router::new()
-        .merge(me::router())
+    // Routes for a signed-in identity. Two layers: `require_identity` verifies
+    // the CF Access JWT (or injects the dev owner), and `require_provisioned`
+    // rejects an authenticated address the app has no grant for. `/me` sits
+    // outside the second layer so the SPA can tell a signed-in-but-not-invited
+    // visitor what's wrong instead of showing a bare 403.
+    //
+    // Per-trip authorization is the role resolver in `trips::require_trip_*`:
+    // owners get everything, edit members get trip content, view members read.
+    let provisioned = Router::new()
         .merge(trips::router())
         .merge(travelers::router())
         .merge(items::router())
         .merge(day_notes::router())
         .merge(share::router())
+        .merge(members::router())
         .merge(email_senders::router())
+        .route_layer(middleware::from_fn(auth::require_provisioned));
+
+    let authed = Router::new()
+        .merge(me::router())
+        .merge(provisioned)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
-            auth::require_owner,
+            auth::require_identity,
         ));
 
     // Guest share-token routes — token in path, auth happens in shared::middleware.
@@ -39,7 +52,7 @@ pub fn api_router(state: AppState) -> Router {
     let intake_routes = intake::router();
 
     public
-        .merge(owner)
+        .merge(authed)
         .merge(shared_routes)
         .merge(intake_routes)
         .with_state(state)
