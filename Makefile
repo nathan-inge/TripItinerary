@@ -2,7 +2,7 @@
 
 # Local development: run backend and frontend in separate terminals.
 dev-backend:
-	cd backend && DEV_BYPASS_AUTH=1 cargo run
+	cd backend && TRIPIT_AUTH_MODE=none cargo run
 
 dev-frontend:
 	cd frontend && npm run dev

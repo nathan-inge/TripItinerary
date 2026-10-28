@@ -13,6 +13,18 @@ See [REQUIREMENTS.md](./REQUIREMENTS.md) and [TECH_SPEC.md](./TECH_SPEC.md) for
 the full design. Currently shipping **M1 (CRUD)**, **M2 (paste parsing)**, and
 **M3 (sharing)**. M4 (gap detection) and M5 (email intake) are next.
 
+## Self-host with Docker
+
+```bash
+cp .env.example .env      # set OWNER_EMAIL; optionally a parse backend
+docker compose up -d --build
+open http://localhost:5050
+```
+
+That's a no-login local trial. For real use (behind a reverse proxy,
+Tailscale, or Cloudflare Access) and fully-local parsing with Ollama, see
+**[SELF_HOSTING.md](./SELF_HOSTING.md)**.
+
 ## Quickstart — local dev on Mac
 
 ```bash
@@ -20,20 +32,21 @@ the full design. Currently shipping **M1 (CRUD)**, **M2 (paste parsing)**, and
 make build-frontend
 
 # terminal A — backend on :5050
-cd backend && DEV_BYPASS_AUTH=1 cargo run
+cd backend && TRIPIT_AUTH_MODE=none OWNER_EMAIL=you@example.com cargo run
 
 # terminal B — frontend dev server on :3001 (proxies /api → :5050, HMR)
 cd frontend && npm run dev
 ```
 
-`DEV_BYPASS_AUTH=1` skips Cloudflare Access JWT verification (required for
-local dev — CF Access only signs requests that come through the tunnel).
+`TRIPIT_AUTH_MODE=none` skips authentication and acts as the first
+`OWNER_EMAIL` (needed for local dev: CF Access only signs requests that come
+through the tunnel).
 
 For paste-text parsing locally, also set `ANTHROPIC_API_KEY`.
 
 Open <http://localhost:3001>.
 
-## Deploy
+## Deploy (bare metal)
 
 A Linux server behind a Cloudflare Tunnel + Cloudflare Access. See
 **[DEPLOY.md](./DEPLOY.md)** for the end-to-end walkthrough (one-time tunnel
@@ -48,7 +61,7 @@ Configuration lives in `~/.config/tripit/env`; see [`.env.example`](./.env.examp
 | Backend  | Rust + axum + sqlx (sqlite) + tokio + utoipa                    |
 | Database | SQLite (WAL, FK on) at `~/.tripit/db.sqlite`                    |
 | Frontend | React 18, Vite, TypeScript, Tailwind, React Router, vite-pwa    |
-| Auth     | Cloudflare Access JWT (+ per-trip email membership) and opaque share tokens |
+| Auth     | Cloudflare Access JWT or trusted proxy header (+ per-trip email membership) and opaque share tokens |
 | Parsing  | Anthropic Claude (Sonnet 4.6 default) — server-side             |
 
 ## Layout

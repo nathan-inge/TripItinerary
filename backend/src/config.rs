@@ -1,5 +1,20 @@
 use anyhow::{anyhow, Result};
+use axum::http::HeaderName;
 use std::path::PathBuf;
+
+/// How signed-in callers are identified. Share-token and email-intake routes
+/// have their own auth and are unaffected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthMode {
+    /// Verify the Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`).
+    CloudflareAccess,
+    /// Trust an email header set by an authenticating reverse proxy
+    /// (oauth2-proxy, Authelia, Tailscale Serve, ...). Only safe when the
+    /// proxy is the sole way to reach the app.
+    TrustedHeader(HeaderName),
+    /// No auth: every caller is the primary owner. Local trial / dev only.
+    None,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseBackend {
@@ -21,9 +36,9 @@ pub struct Config {
     pub bind_addr: String,
     /// Allow-list of owner emails, lowercased. Guaranteed non-empty.
     pub owner_emails: Vec<String>,
+    pub auth_mode: AuthMode,
     pub cf_access_team_domain: Option<String>,
     pub cf_access_aud: Option<String>,
-    pub dev_bypass_auth: bool,
 
     pub parse_backend: ParseBackend,
 
@@ -48,6 +63,11 @@ impl Config {
         let dev_bypass_auth = std::env::var("DEV_BYPASS_AUTH")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+        let auth_mode = parse_auth_mode(
+            std::env::var("TRIPIT_AUTH_MODE").ok().as_deref(),
+            std::env::var("TRIPIT_AUTH_HEADER").ok().as_deref(),
+            dev_bypass_auth,
+        )?;
 
         let anthropic_api_key = std::env::var("ANTHROPIC_API_KEY").ok();
         let parse_model = std::env::var("TRIPIT_PARSE_MODEL")
@@ -92,11 +112,24 @@ impl Config {
             }
         };
 
-        if !dev_bypass_auth && (cf_access_team_domain.is_none() || cf_access_aud.is_none()) {
-            tracing::warn!(
-                "CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are unset; \
-                 set DEV_BYPASS_AUTH=1 for local development, or configure them in production."
-            );
+        match &auth_mode {
+            AuthMode::CloudflareAccess
+                if cf_access_team_domain.is_none() || cf_access_aud.is_none() =>
+            {
+                tracing::warn!(
+                    "CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are unset; configure them, \
+                     or pick another TRIPIT_AUTH_MODE (header | none)."
+                );
+            }
+            AuthMode::CloudflareAccess => tracing::info!("auth mode = cloudflare access"),
+            AuthMode::TrustedHeader(h) => tracing::warn!(
+                "auth mode = trusted header {h:?} — make sure only your reverse proxy \
+                 can reach this port, or anyone can claim any identity."
+            ),
+            AuthMode::None => tracing::warn!(
+                "auth mode = NONE — every request acts as {}. Local use only.",
+                owner_emails[0]
+            ),
         }
         match parse_backend {
             ParseBackend::Anthropic if anthropic_api_key.is_none() => {
@@ -131,9 +164,9 @@ impl Config {
             database_url,
             bind_addr,
             owner_emails,
+            auth_mode,
             cf_access_team_domain,
             cf_access_aud,
-            dev_bypass_auth,
             parse_backend,
             anthropic_api_key,
             parse_model,
@@ -155,6 +188,33 @@ impl Config {
     /// guaranteed non-empty by [`parse_owner_emails`].
     pub fn primary_owner(&self) -> &str {
         &self.owner_emails[0]
+    }
+}
+
+/// Resolve `TRIPIT_AUTH_MODE` (+ `TRIPIT_AUTH_HEADER`). Defaults to Cloudflare
+/// Access so existing deploys keep their behavior. `DEV_BYPASS_AUTH=1` is the
+/// legacy spelling of `none`.
+fn parse_auth_mode(mode: Option<&str>, header: Option<&str>, dev_bypass: bool) -> Result<AuthMode> {
+    if dev_bypass {
+        return match mode {
+            None | Some("none") => Ok(AuthMode::None),
+            Some(other) => Err(anyhow!(
+                "DEV_BYPASS_AUTH=1 conflicts with TRIPIT_AUTH_MODE={other:?}; unset one"
+            )),
+        };
+    }
+    match mode {
+        None | Some("cloudflare") | Some("cf-access") => Ok(AuthMode::CloudflareAccess),
+        Some("header") | Some("trusted-header") => {
+            let name = header.unwrap_or("X-Forwarded-Email");
+            let name = HeaderName::try_from(name)
+                .map_err(|_| anyhow!("TRIPIT_AUTH_HEADER={name:?} is not a valid header name"))?;
+            Ok(AuthMode::TrustedHeader(name))
+        }
+        Some("none") | Some("off") => Ok(AuthMode::None),
+        Some(other) => Err(anyhow!(
+            "TRIPIT_AUTH_MODE={other:?} unrecognized; use cloudflare|header|none"
+        )),
     }
 }
 
@@ -203,6 +263,31 @@ mod tests {
     fn owner_emails_parsed_trimmed_and_lowercased() {
         let e = parse_owner_emails(Some("  Owner@Example.COM ".into())).unwrap();
         assert_eq!(e, vec!["owner@example.com"]);
+    }
+
+    #[test]
+    fn auth_mode_defaults_to_cloudflare() {
+        assert_eq!(parse_auth_mode(None, None, false).unwrap(), AuthMode::CloudflareAccess);
+    }
+
+    #[test]
+    fn auth_mode_header_default_and_custom() {
+        assert_eq!(
+            parse_auth_mode(Some("header"), None, false).unwrap(),
+            AuthMode::TrustedHeader(HeaderName::from_static("x-forwarded-email"))
+        );
+        assert_eq!(
+            parse_auth_mode(Some("header"), Some("Tailscale-User-Login"), false).unwrap(),
+            AuthMode::TrustedHeader(HeaderName::from_static("tailscale-user-login"))
+        );
+        assert!(parse_auth_mode(Some("header"), Some("bad header"), false).is_err());
+    }
+
+    #[test]
+    fn auth_mode_dev_bypass_is_none_and_conflicts_with_others() {
+        assert_eq!(parse_auth_mode(None, None, true).unwrap(), AuthMode::None);
+        assert!(parse_auth_mode(Some("header"), None, true).is_err());
+        assert!(parse_auth_mode(Some("bogus"), None, false).is_err());
     }
 
     #[test]

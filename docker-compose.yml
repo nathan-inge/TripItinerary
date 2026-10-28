@@ -1,0 +1,43 @@
+# Self-hosted tripit. Quick start:
+#   cp .env.example .env    # set OWNER_EMAIL at minimum
+#   docker compose up -d    # → http://localhost:5050
+#
+# Local LLM parsing (no API key, nothing leaves the box):
+#   set TRIPIT_OLLAMA_URL=http://ollama:11434 in .env, then
+#   docker compose --profile ollama up -d
+#   docker compose exec ollama ollama pull qwen2.5:7b-instruct
+#
+# See SELF_HOSTING.md for auth modes and putting it behind a reverse proxy.
+
+services:
+  tripit:
+    build:
+      context: .
+      args:
+        VITE_INTAKE_ADDRESS: ${VITE_INTAKE_ADDRESS:-}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Defaults to no-auth single-user mode for a local trial. Change to
+      # `header` (behind a reverse proxy) or `cloudflare` before exposing it.
+      TRIPIT_AUTH_MODE: ${TRIPIT_AUTH_MODE:-none}
+      OWNER_EMAIL: ${OWNER_EMAIL:-owner@example.com}
+    ports:
+      # Loopback only. Your reverse proxy (or browser, in trial mode) talks
+      # to this; never publish it on 0.0.0.0 in `header` or `none` mode.
+      - "127.0.0.1:${TRIPIT_PORT:-5050}:5050"
+    volumes:
+      - tripit-data:/data
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [ollama]
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  tripit-data:
+  ollama-models:

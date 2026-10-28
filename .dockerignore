@@ -1,0 +1,10 @@
+.git
+.claude
+.env
+.env.*
+!.env.example
+**/node_modules
+**/target
+frontend/dist
+ops/email-worker
+*.sqlite*

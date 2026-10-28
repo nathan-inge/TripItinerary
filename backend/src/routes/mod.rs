@@ -20,7 +20,7 @@ pub fn api_router(state: AppState) -> Router {
     let public = Router::new().merge(health::router());
 
     // Routes for a signed-in identity. Two layers: `require_identity` verifies
-    // the CF Access JWT (or injects the dev owner), and `require_provisioned`
+    // the caller per TRIPIT_AUTH_MODE (CF Access JWT, proxy header, or none), and `require_provisioned`
     // rejects an authenticated address the app has no grant for. `/me` sits
     // outside the second layer so the SPA can tell a signed-in-but-not-invited
     // visitor what's wrong instead of showing a bare 403.

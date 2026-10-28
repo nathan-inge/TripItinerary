@@ -501,8 +501,10 @@ TECH_SPEC.md
 | ------------------------- | ------------------------------------------------ | ----------------------------------------- |
 | `DATABASE_URL`            | `sqlite://~/.tripit/db.sqlite?mode=rwc`          |                                           |
 | `BIND_ADDR`               | `127.0.0.1:5050`                                 |                                           |
-| `CF_ACCESS_TEAM_DOMAIN`   | e.g. `<team>.cloudflareaccess.com`               | For JWKS fetch                            |
-| `CF_ACCESS_AUD`           | (required)                                       | App AUD tag                               |
+| `TRIPIT_AUTH_MODE`        | `cloudflare`                                     | `cloudflare` \| `header` \| `none`         |
+| `TRIPIT_AUTH_HEADER`      | `X-Forwarded-Email`                              | Email header trusted in `header` mode     |
+| `CF_ACCESS_TEAM_DOMAIN`   | e.g. `<team>.cloudflareaccess.com`               | `cloudflare` mode: JWKS fetch             |
+| `CF_ACCESS_AUD`           | (required in `cloudflare` mode)                  | App AUD tag                               |
 | `OWNER_EMAIL`             | (required)                                       | Comma-separated bootstrap owners; members come from `trip_members` |
 | `ANTHROPIC_API_KEY`       | (required)                                       |                                           |
 | `TRIPIT_PARSE_MODEL`      | `claude-sonnet-4-6`                              | Override per-request also possible        |
