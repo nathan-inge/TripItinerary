@@ -1,17 +1,46 @@
 # TripItinerary
 
-Self-hosted trip itinerary webapp. Drops every booking confirmation into one
-chronological per-trip view, flags obvious holes (uncovered nights, missing
-inbound/outbound), and lets you share trips with travel companions — either
-by their own email, so the trip shows up on their home page, or via an
-unguessable link for anyone who shouldn't need an account.
+Self-hosted trip itinerary webapp. Paste or forward your booking
+confirmations and get one chronological, day-by-day view of the trip that
+your travel companions can read and edit with you.
 
-Ships as a single Rust binary (SPA embedded) + one SQLite file. The reference
-deploy runs behind a Cloudflare Tunnel with Cloudflare Access in front.
+Ships as a single Rust binary (SPA embedded) + one SQLite file.
+
+## Features
+
+**Itinerary**
+- Day-by-day timeline of flights, lodging, transport, and activities.
+  Multi-day stays and journeys get continuation banners on every day they
+  span.
+- Past days collapse automatically; today and upcoming days stay open.
+- Every item location links straight to Google Maps.
+- Attach links to any item (check-in page, tickets, menu).
+
+**Getting confirmations in**
+- Paste a confirmation email and an LLM extracts the structured fields.
+  Low-confidence parses are flagged for review before saving.
+- Or forward it to an intake address, with the trip name on the first line.
+  Only senders on the trip's allow-list are accepted.
+- Parse with Anthropic Claude or fully locally with Ollama. Before anything
+  reaches a model, card numbers, phone numbers, emails, traveler names, and
+  booking references are redacted, and the booking references are swapped
+  back in locally afterwards.
+
+**Planning together**
+- Rich-text notes for each day, editable by anyone with edit access, for
+  the plan, reservations to make, or ideas.
+- Trip-wide todo list, with an open-count badge on the trip list.
+- Tag each item with the travelers it applies to.
+- Trip-level links to a shared photo album and a Google Maps list.
+
+**Sharing**
+- Share a trip by email (it shows up on their trip list) or by an
+  unguessable link for guests who shouldn't need an account.
+- Owner, edit, and view roles. Links can be revoked.
+- Installable PWA for use on your phone while traveling.
 
 See [REQUIREMENTS.md](./REQUIREMENTS.md) and [TECH_SPEC.md](./TECH_SPEC.md) for
-the full design. Currently shipping **M1 (CRUD)**, **M2 (paste parsing)**, and
-**M3 (sharing)**. M4 (gap detection) and M5 (email intake) are next.
+the full design.
 
 ## Self-host with Docker
 
@@ -62,14 +91,14 @@ Configuration lives in `~/.config/tripit/env`; see [`.env.example`](./.env.examp
 | Database | SQLite (WAL, FK on) at `~/.tripit/db.sqlite`                    |
 | Frontend | React 18, Vite, TypeScript, Tailwind, React Router, vite-pwa    |
 | Auth     | Cloudflare Access JWT or trusted proxy header (+ per-trip email membership) and opaque share tokens |
-| Parsing  | Anthropic Claude (Sonnet 4.6 default) — server-side             |
+| Parsing  | Anthropic Claude or local Ollama, with PII redaction first     |
 
 ## Layout
 
 ```
 backend/   Rust + axum + sqlx + utoipa; embeds frontend/dist via rust-embed
 frontend/  React + Vite + Tailwind + PWA
-ops/       systemd unit, cloudflared example, deploy.sh, email-worker (M5)
+ops/       systemd unit, cloudflared example, deploy.sh, email-worker
 ```
 
 ## Make targets
@@ -87,8 +116,8 @@ ops/       systemd unit, cloudflared example, deploy.sh, email-worker (M5)
 ## API
 
 REST under `/api`. Health is unauthenticated; everything else needs either a
-Cloudflare Access JWT (the trip's owner, or an address it's been shared with)
-or a share token in the URL (guests). Each trip response carries `my_role` —
+signed-in identity (per `TRIPIT_AUTH_MODE`: the trip's owner, or an address
+it's been shared with) or a share token in the URL (guests). Each trip response carries `my_role` —
 `owner`, `edit`, or `view` — which is what the UI gates on. The OpenAPI 3 spec
 is published at `/api/openapi.json`.
 
