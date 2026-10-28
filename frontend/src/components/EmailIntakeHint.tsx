@@ -15,6 +15,10 @@ export default function EmailIntakeHint({ tripId, tripName, manageHref }: Props)
 
   const copy = (text: string) => navigator.clipboard?.writeText(text);
 
+  // Email intake is optional; hide this when it isn't configured.
+  const address = INTAKE_ADDRESS;
+  if (!address) return null;
+
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
       <p>
@@ -22,11 +26,11 @@ export default function EmailIntakeHint({ tripId, tripName, manageHref }: Props)
         Or forward a confirmation to{' '}
         <button
           type="button"
-          onClick={() => copy(INTAKE_ADDRESS)}
+          onClick={() => copy(address)}
           title="Copy address"
           className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-800 hover:bg-slate-100"
         >
-          {INTAKE_ADDRESS}
+          {address}
         </button>{' '}
         with{' '}
         <button

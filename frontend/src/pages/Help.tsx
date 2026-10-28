@@ -17,7 +17,11 @@ export default function Help() {
       <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-lg font-semibold">The path your email takes</h2>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
-          <li>You paste a confirmation, or forward one to <code className="rounded bg-slate-100 px-1 font-mono text-[12px]">{INTAKE_ADDRESS}</code>.</li>
+          {INTAKE_ADDRESS ? (
+            <li>You paste a confirmation, or forward one to <code className="rounded bg-slate-100 px-1 font-mono text-[12px]">{INTAKE_ADDRESS}</code>.</li>
+          ) : (
+            <li>You paste a confirmation.</li>
+          )}
           <li>It arrives on the self-hosted server.</li>
           <li>The <b>redactor</b> runs locally — see below for what it strips.</li>
           <li>The redacted text is sent to a language model to extract structured fields.</li>

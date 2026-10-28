@@ -1,16 +1,15 @@
 # TripItinerary — Technical Implementation Spec
 
-Companion to [REQUIREMENTS.md](./REQUIREMENTS.md). Mirrors the
-ContextualTaskOrganizer deploy shape so the same CloudDesktop can run both.
+Companion to [REQUIREMENTS.md](./REQUIREMENTS.md).
 
 ## 1. Architecture
 
 One Rust binary, one SQLite file, one Cloudflare Tunnel. The SPA is built and
-embedded into the binary via `rust-embed`, same as CTO.
+embedded into the binary via `rust-embed`.
 
 ```
                 Cloudflare Tunnel
- user / guests ───────────────────►  travel.nathaninge.com
+ user / guests ───────────────────►  tripit.example.com
                                           │
                   ┌───────────────────────┴───────────────────────┐
                   │  Cloudflare Access policies on this hostname  │
@@ -29,10 +28,10 @@ embedded into the binary via `rust-embed`, same as CTO.
 Inbound email path is separate and asynchronous:
 
 ```
-  trips@in.nathaninge.com  →  Cloudflare Email Worker
+  trips@in.example.com  →  Cloudflare Email Worker
                                     │
                                     ▼  (HTTPS POST, HMAC-signed)
-                            travel.nathaninge.com/api/intake/email
+                            tripit.example.com/api/intake/email
 ```
 
 The Email Worker is a thin shim that reposts the parsed email JSON to the app.
@@ -49,7 +48,7 @@ so the Worker can reach it but the public can't.
 | Frontend | React 18, Vite, TypeScript, Tailwind, React Router, vite-pwa                 |
 | Auth     | Cloudflare Access JWT verification + opaque share tokens                     |
 | Email    | Cloudflare Email Routing → Email Worker → HMAC-signed webhook                |
-| Tunnel   | `cloudflared` on the CloudDesktop                                            |
+| Tunnel   | `cloudflared` on the server                                            |
 
 ## 3. Data model
 
@@ -374,9 +373,9 @@ Configure in the CF dashboard, in order:
 ## 8. Email intake
 
 ### 8.1 Cloudflare Email Worker
-- Domain `nathaninge.com` already has CF DNS; add MX records for
-  `in.nathaninge.com` pointing at CF's email-routing servers.
-- Email Routing rule: `trips@in.nathaninge.com` → Email Worker.
+- Domain `example.com` already has CF DNS; add MX records for
+  `in.example.com` pointing at CF's email-routing servers.
+- Email Routing rule: `trips@in.example.com` → Email Worker.
 - Worker code (TypeScript) parses with `postal-mime`, then POSTs:
 
 ```ts
@@ -388,7 +387,7 @@ const body = {
   received_at: new Date().toISOString(),
 };
 const sig = await hmac(env.SHARED_SECRET, JSON.stringify(body));
-await fetch("https://travel.nathaninge.com/api/intake/email", {
+await fetch("https://tripit.example.com/api/intake/email", {
   method: "POST",
   headers: {
     "X-Tripit-Signature": sig,
@@ -426,7 +425,7 @@ await fetch("https://travel.nathaninge.com/api/intake/email", {
 - No background sync, no offline write queue.
 
 ### 9.3 UI shape
-- Mobile-first, Tailwind, same component vocabulary as CTO.
+- Mobile-first, Tailwind.
 - Itinerary view is a vertical timeline grouped by day. Lodging shows as a
   banner spanning the day-card stack it covers. Gap banners interleave.
 - **Day header** on each day-card has an inline Markdown editor for day
@@ -501,8 +500,8 @@ TECH_SPEC.md
 | Var                       | Default                                          | Notes                                     |
 | ------------------------- | ------------------------------------------------ | ----------------------------------------- |
 | `DATABASE_URL`            | `sqlite://~/.tripit/db.sqlite?mode=rwc`          |                                           |
-| `BIND_ADDR`               | `127.0.0.1:5050`                                 | Different from CTO's :5000                |
-| `CF_ACCESS_TEAM_DOMAIN`   | e.g. `nathan.cloudflareaccess.com`               | For JWKS fetch                            |
+| `BIND_ADDR`               | `127.0.0.1:5050`                                 |                                           |
+| `CF_ACCESS_TEAM_DOMAIN`   | e.g. `<team>.cloudflareaccess.com`               | For JWKS fetch                            |
 | `CF_ACCESS_AUD`           | (required)                                       | App AUD tag                               |
 | `OWNER_EMAIL`             | (required)                                       | Comma-separated bootstrap owners; members come from `trip_members` |
 | `ANTHROPIC_API_KEY`       | (required)                                       |                                           |
@@ -513,36 +512,36 @@ TECH_SPEC.md
 
 ## 12. Deploy
 
-Same shape as CTO — single binary, systemd user unit, Cloudflare Tunnel.
+Single binary, systemd user unit, Cloudflare Tunnel.
 
 1. `make build` on the dev mac (or in CI) — produces
    `backend/target/release/tripit`.
-2. `REMOTE=user@cd-host ops/deploy.sh` rsyncs + builds release-mode on the
-   CloudDesktop, installs to `~/.local/bin/tripit`, drops
+2. `REMOTE=user@host ops/deploy.sh` rsyncs + builds release-mode on the
+   server, installs to `~/.local/bin/tripit`, drops
    `~/.config/systemd/user/tripit.service`, restarts.
-3. `cloudflared` config (already running for CTO) gains an extra ingress:
+3. `cloudflared` config (possibly already fronting other services) gains an extra ingress:
 
 ```yaml
 ingress:
-  - hostname: todo.nathaninge.com
+  - hostname: other.example.com
     service: http://127.0.0.1:5000
-  - hostname: travel.nathaninge.com
+  - hostname: tripit.example.com
     service: http://127.0.0.1:5050
   - service: http_status:404
 ```
 
-4. Cloudflare Access application on `travel.nathaninge.com` with the three
+4. Cloudflare Access application on `tripit.example.com` with the three
    policies in §7.2.
 
 5. (Optional, v1) Email Worker deployed to a CF Worker; MX records added for
-   `in.nathaninge.com`.
+   `in.example.com`.
 
 ## 13. Milestones
 
 **M1 — core CRUD (no parsing, no sharing).**
 Schema, migrations, owner auth via CF Access, manual item entry, timeline
 view, day notes, item link pills + tap-to-copy confirmation #. Working
-end-to-end at `travel.nathaninge.com`.
+end-to-end at `tripit.example.com`.
 
 **M2 — paste-text parsing.**
 Anthropic integration, structured-output prompt (incl. link extraction),

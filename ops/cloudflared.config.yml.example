@@ -1,14 +1,14 @@
 # Cloudflare Tunnel ingress for tripit.
 #
 # This is an example showing how to add tripit to an existing tunnel that may
-# already be routing other services (e.g. CTO at todo.nathaninge.com).
+# already be routing other services (e.g. another app at other.example.com).
 #
-# Bringup (one-time, on the CloudDesktop):
+# Bringup (one-time, on the server):
 #   sudo cloudflared tunnel login
 #   sudo cloudflared tunnel create tripit          # or reuse existing
 #   sudo cp ops/cloudflared.config.yml.example /etc/cloudflared/config.yml
 #   # replace TUNNEL_ID and confirm hostnames below
-#   sudo cloudflared tunnel route dns tripit travel.nathaninge.com
+#   sudo cloudflared tunnel route dns tripit tripit.example.com
 #   sudo cloudflared service install
 #   sudo systemctl restart cloudflared
 
@@ -17,11 +17,11 @@ credentials-file: /etc/cloudflared/TUNNEL_ID.json
 
 ingress:
   # Existing services (preserve whatever you already have routed):
-  - hostname: todo.nathaninge.com
+  - hostname: other.example.com
     service: http://127.0.0.1:5000
 
   # New: tripit on port 5050.
-  - hostname: travel.nathaninge.com
+  - hostname: tripit.example.com
     service: http://127.0.0.1:5050
 
   # Catch-all (required as the last entry).

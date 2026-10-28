@@ -4,11 +4,11 @@ A self-hosted webapp that turns a pile of travel confirmations (flights, hotels,
 Airbnbs, museum tickets, restaurant reservations, train bookings) into a single,
 linear, day-by-day itinerary per trip — and flags the obvious holes.
 
-Vended at `travel.nathaninge.com`, behind Cloudflare Access for the owner, with
+Vended at `tripit.example.com`, behind Cloudflare Access for the owner, with
 per-trip share tokens for guests.
 
-Sibling project to ContextualTaskOrganizer; same deploy shape (single Rust
-binary + embedded SPA + SQLite, Cloudflare Tunnel to a CloudDesktop).
+Deploy shape: single Rust binary + embedded SPA + SQLite, Cloudflare Tunnel
+to a Linux server.
 
 ## 1. Goals
 
@@ -137,7 +137,7 @@ LLM call (Anthropic API) to extract structured fields from unstructured email.
 
 ### 6.2 Email forwarding
 - Each owner has a single inbound address, e.g.
-  `trips@in.nathaninge.com`.
+  `trips@in.example.com`.
 - Forwarding it adds an item to the **most recent active trip** by default,
   with a fallback "inbox" if no trip is plausibly current. (Editable.)
 - Same Claude extraction; the email body (plain + HTML) is the input.
@@ -222,8 +222,8 @@ locations, which is its own can of worms.)
 ## 11. Resolved decisions
 
 1. **Email intake**: Cloudflare Email Routing → Email Worker. Intake address
-   is `trips@in.nathaninge.com` — a dedicated subdomain so the apex
-   `nathaninge.com` MX records (real mail) stay untouched. The Worker
+   is `trips@in.example.com` — a dedicated subdomain so the apex
+   `example.com` MX records (real mail) stay untouched. The Worker
    HMAC-signs and POSTs to `/api/intake/email`.
 2. **Default trip on email arrival**: pick the trip where
    `start_date - 7d ≤ today ≤ end_date + 1d`. Ambiguous (0 or >1 matches) →

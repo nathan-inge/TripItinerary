@@ -5,13 +5,11 @@ compatibility_flags = ["nodejs_compat"]
 
 # Routing rule for Cloudflare Email Routing is configured in the dashboard
 # (Email Routing → Routing rules → Send to a Worker). Match
-# `trips@in.nathaninge.com` and pick this Worker as the destination.
+# your intake address (e.g. `trips@in.example.com`) and pick this Worker as the destination.
 
 # Secrets are NOT stored in this file. Push them with:
+#   wrangler secret put TARGET_URL   # https://<your-host>/api/intake/email
 #   wrangler secret put TRIPIT_EMAIL_HMAC_KEY
 #   wrangler secret put CF_ACCESS_CLIENT_ID
 #   wrangler secret put CF_ACCESS_CLIENT_SECRET
 # (See ops/email-worker/README.md for the full setup.)
-
-[vars]
-TARGET_URL = "https://travel.nathaninge.com/api/intake/email"

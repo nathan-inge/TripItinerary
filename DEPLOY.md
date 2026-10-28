@@ -1,23 +1,22 @@
 # Deploy
 
-End-to-end guide to standing up `travel.nathaninge.com` from a fresh
-CloudDesktop. Mirrors the ContextualTaskOrganizer deploy shape so the same
-host can run both apps.
+End-to-end guide to standing up tripit at `tripit.example.com` on a fresh
+Linux server. Substitute your own domain throughout.
 
 ## Prereqs
 
-- A Linux CloudDesktop reachable via SSH (`marvin` — Nathan's CloudDesktop host).
-- `cloudflared` installed on the CloudDesktop with a Tunnel that fronts
-  `*.nathaninge.com`. If you already deployed CTO this is done.
+- A Linux server reachable via SSH (referred to as `<host>` below).
+- `cloudflared` installed on the server with a Tunnel that fronts
+  your domain (`*.example.com`).
 - A Cloudflare Access "team" set up at `<team>.cloudflareaccess.com`.
   Find your team name at **Zero Trust → Settings → Custom Pages (or
   General) → Team domain**.
 - An `ANTHROPIC_API_KEY` (for paste-text parsing, M2+).
 
-## 1. CloudDesktop: install Rust + Node
+## 1. server: install Rust + Node
 
 ```bash
-ssh marvin
+ssh <host>
 # Rust 1.94+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 # Node 20+
@@ -25,7 +24,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs build-essential pkg-config
 ```
 
-## 2. Cloudflare Tunnel: add the `travel.nathaninge.com` ingress
+## 2. Cloudflare Tunnel: add the `tripit.example.com` ingress
 
 `/etc/cloudflared/config.yml` is root-owned, so edit with sudo:
 
@@ -39,7 +38,7 @@ for the full shape. The relevant block:
 
 ```yaml
 ingress:
-  - hostname: travel.nathaninge.com
+  - hostname: tripit.example.com
     service: http://127.0.0.1:5050
   # keep your existing entries before the catch-all
   - service: http_status:404
@@ -50,7 +49,7 @@ up:
 
 ```bash
 sudo cloudflared --config /etc/cloudflared/config.yml tunnel ingress validate
-sudo cloudflared tunnel route dns <TUNNEL_NAME> travel.nathaninge.com
+sudo cloudflared tunnel route dns <TUNNEL_NAME> tripit.example.com
 sudo systemctl restart cloudflared
 sudo systemctl status cloudflared --no-pager
 ```
@@ -69,7 +68,7 @@ reach without SSO — the share routes and the SPA's static assets. The
 shell contains no secrets; bypassing it is safe.
 
 In Cloudflare dashboard → **Zero Trust → Access → Applications**, create
-both apps under the same `travel.nathaninge.com` hostname:
+both apps under the same `tripit.example.com` hostname:
 
 ### App 1 — Public bypass
 
@@ -77,7 +76,7 @@ both apps under the same `travel.nathaninge.com` hostname:
 |---------|--------------------------------------------------------------------------------------------|
 | Type    | Self-hosted                                                                                |
 | Name    | `tripit public bypass`                                                                     |
-| Domain  | `travel.nathaninge.com`                                                                    |
+| Domain  | `tripit.example.com`                                                                    |
 | **Paths** | Add **each** as a separate entry in the Paths list:                                      |
 |         | `/share/*` — guest SPA route                                                               |
 |         | `/api/share/*` — guest API                                                                 |
@@ -101,7 +100,7 @@ One policy:
 |------------|--------------------------------------------------------|
 | Type       | Self-hosted                                            |
 | Name       | `tripit owner`                                         |
-| Domain     | `travel.nathaninge.com`                                |
+| Domain     | `tripit.example.com`                                |
 | **Path**   | *(leave blank — covers the whole hostname)*            |
 | Session    | 24h (or whatever you prefer)                           |
 
@@ -134,7 +133,7 @@ so its AUD is unused.
 > Action = Service Auth and a Service Token. Skip until you're ready to
 > wire up forwarding.
 
-## 4. Provision secrets on the CloudDesktop
+## 4. Provision secrets on the server
 
 ```bash
 mkdir -p ~/.config/tripit
@@ -180,17 +179,17 @@ won't refuse to start if the file is missing.
 From your Mac:
 
 ```bash
-make deploy
+make deploy REMOTE=<host>
 ```
 
-(`marvin` is the default remote; override with `REMOTE=other-host make deploy`.)
+(`REMOTE` is any SSH destination; export it in your shell to skip typing it.)
 
 That rsyncs the source, runs `make build` remotely, installs the binary at
 `~/.local/bin/tripit` and the unit at `~/.config/systemd/user/tripit.service`,
 then `daemon-reload + restart`. It also runs `loginctl enable-linger` so
 the user-session persists when you log out.
 
-Verify on the CloudDesktop:
+Verify on the server:
 
 ```bash
 systemctl --user status tripit
@@ -200,12 +199,12 @@ curl http://127.0.0.1:5050/api/health
 
 ## 6. First-time use
 
-1. Open `https://travel.nathaninge.com` on a logged-in browser. Cloudflare
+1. Open `https://tripit.example.com` on a logged-in browser. Cloudflare
    Access redirects you to Google, you authenticate, the JWT lands, and
    the app loads.
 2. Create a trip.
 3. Mint a share link from the Manage page, copy the URL, send to a guest.
-   The guest URL is `https://travel.nathaninge.com/share/<token>` — no
+   The guest URL is `https://tripit.example.com/share/<token>` — no
    account needed on their end.
 
 ## Subsequent deploys
@@ -224,20 +223,20 @@ top of the body and parses the rest with Claude. End-to-end setup:
 
 ### 7.1 DNS — MX records for the intake subdomain
 
-The apex `nathaninge.com` keeps its existing mail. Put intake on a
-subdomain (`in.nathaninge.com`) so they don't collide. In Cloudflare
+The apex `example.com` keeps its existing mail. Put intake on a
+subdomain (`in.example.com`) so they don't collide. In Cloudflare
 DNS, add MX records for the `in` subdomain pointing at Cloudflare's
 email-routing servers:
 
 ```
-in.nathaninge.com   MX 10  route1.mx.cloudflare.net
-in.nathaninge.com   MX 20  route2.mx.cloudflare.net
-in.nathaninge.com   MX 50  route3.mx.cloudflare.net
+in.example.com   MX 10  route1.mx.cloudflare.net
+in.example.com   MX 20  route2.mx.cloudflare.net
+in.example.com   MX 50  route3.mx.cloudflare.net
 ```
 
 ### 7.2 Enable Email Routing on the subdomain
 
-Dashboard → **Email → Email Routing** → enable for `in.nathaninge.com`.
+Dashboard → **Email → Email Routing** → enable for `in.example.com`.
 (You'll briefly see a "verifying MX records" step. Wait until it goes
 green.)
 
@@ -252,10 +251,10 @@ In Zero Trust → **Access → Service Auth → Service Tokens**, create a
 token named `tripit-email-worker`. Save the **Client ID** and **Client
 Secret** — you'll need both.
 
-Add the HMAC key to the backend env on marvin and restart:
+Add the HMAC key to the backend env on the server and restart:
 
 ```bash
-ssh marvin
+ssh <host>
 echo 'TRIPIT_EMAIL_HMAC_KEY=<your-32-byte-hex>' >> ~/.config/tripit/env
 systemctl --user restart tripit
 ```
@@ -263,13 +262,13 @@ systemctl --user restart tripit
 ### 7.4 CF Access App for `/api/intake/email`
 
 In Zero Trust → Access → Applications, add a third app on
-`travel.nathaninge.com`:
+`tripit.example.com`:
 
 | Field   | Value                                                       |
 |---------|-------------------------------------------------------------|
 | Type    | Self-hosted                                                 |
 | Name    | `tripit email worker`                                       |
-| Domain  | `travel.nathaninge.com`                                     |
+| Domain  | `tripit.example.com`                                     |
 | **Path** | `/api/intake/email`                                        |
 
 Policy:
@@ -289,6 +288,7 @@ Worker's POSTs are allowed; everything else still needs owner SSO.
 cd ops/email-worker
 npm install
 npx wrangler login                                   # if not already
+npx wrangler secret put TARGET_URL                   # https://tripit.example.com/api/intake/email
 npx wrangler secret put TRIPIT_EMAIL_HMAC_KEY        # same hex as backend
 npx wrangler secret put CF_ACCESS_CLIENT_ID          # from §7.3
 npx wrangler secret put CF_ACCESS_CLIENT_SECRET      # from §7.3
@@ -298,14 +298,25 @@ npx wrangler deploy
 ### 7.6 Route the address to the Worker
 
 Email Routing → **Routing rules** → Create a rule:
-- Match: `trips@in.nathaninge.com`
+- Match: `trips@in.example.com`
 - Action: **Send to a Worker** → `tripit-email-worker`
+
+Then tell the frontend the address so it shows the forwarding hints. It's
+baked in at build time, so set it in `frontend/.env.local` (gitignored; the
+deploy rsync carries it to the server) and redeploy:
+
+```bash
+echo 'VITE_INTAKE_ADDRESS=trips@in.example.com' > frontend/.env.local
+make deploy REMOTE=<host>
+```
+
+Without it, the UI hides email intake entirely.
 
 ### 7.7 Add allow-listed senders to a trip
 
 In the app, open a trip's **Manage** page and use **Forward by email**
 to add at least one sender (yourself, to start). They can then forward
-a confirmation to `trips@in.nathaninge.com` with the trip name on the
+a confirmation to `trips@in.example.com` with the trip name on the
 first line of the body:
 
 ```
@@ -328,7 +339,7 @@ Two ways to share, for two different people:
 |---|---|---|
 | Who it's for | anyone without an account — a hotel, a friend who just wants the itinerary | someone who should see shared trips on their own home page |
 | Auth | secret token in the URL, no login | their own Cloudflare Access sign-in |
-| Where it shows up | only if they keep the link | their trip list at `travel.nathaninge.com`, labelled *shared* |
+| Where it shows up | only if they keep the link | their trip list at `tripit.example.com`, labelled *shared* |
 | Revoke | revoke the link | remove the member |
 
 Link sharing is unchanged and needs nothing here. Email sharing takes **two
@@ -388,10 +399,10 @@ SSNs, phone numbers, and naked emails outside URLs are scrubbed before
 the LLM sees them. With Ollama selected as the backend, nothing leaves
 the host at all.
 
-### 9.1 Install Ollama on marvin
+### 9.1 Install Ollama on the server
 
 ```bash
-ssh marvin
+ssh <host>
 curl -fsSL https://ollama.com/install.sh | sh
 # pulls ~4.7GB for qwen2.5; runs once at first inference
 ollama pull qwen2.5:7b-instruct
@@ -435,7 +446,7 @@ client still applies the same PII redactor before the request leaves.
 ## Backup
 
 ```bash
-# on the CloudDesktop
+# on the server
 0 3 * * * cp ~/.tripit/db.sqlite ~/.tripit/backups/db-$(date +\%F).sqlite
 ```
 
@@ -444,7 +455,7 @@ client still applies the same PII redactor before the request leaves.
 The binary is just one file. Keep the previous one around:
 
 ```bash
-# before each deploy, on the CloudDesktop:
+# before each deploy, on the server:
 cp ~/.local/bin/tripit ~/.local/bin/tripit.prev
 ```
 

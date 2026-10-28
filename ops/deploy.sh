@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Rsync source to a remote CloudDesktop, build there, install the binary,
+# Rsync source to a remote Linux host, build there, install the binary,
 # install/refresh the systemd user unit, restart the service.
 #
-#   REMOTE=marvin ops/deploy.sh   (or just ops/deploy.sh — marvin is the default)
+#   REMOTE=<ssh-host> ops/deploy.sh
 
 set -euo pipefail
 
-REMOTE="${REMOTE:-marvin}"
+REMOTE="${REMOTE:?set REMOTE=<ssh-host> (e.g. REMOTE=myserver make deploy)}"
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ">> syncing source to $REMOTE"

@@ -1,14 +1,14 @@
 # tripit Email Worker
 
 Cloudflare Email Worker that receives forwarded confirmation emails on
-`trips@in.nathaninge.com`, parses them, HMAC-signs the JSON, and POSTs to
-`https://travel.nathaninge.com/api/intake/email`.
+`trips@in.example.com`, parses them, HMAC-signs the JSON, and POSTs to
+`https://tripit.example.com/api/intake/email`.
 
 ## Setup (one-time)
 
 ### 1. Add MX records for the intake subdomain
 
-In Cloudflare DNS for `nathaninge.com`, add MX records for `in` pointing at
+In Cloudflare DNS for `example.com`, add MX records for `in` pointing at
 Cloudflare's email-routing MX servers. The current set is in
 [Cloudflare's docs](https://developers.cloudflare.com/email-routing/get-started/enable-email-routing/);
 typically:
@@ -19,10 +19,10 @@ in   MX 20  route2.mx.cloudflare.net
 in   MX 50  route3.mx.cloudflare.net
 ```
 
-### 2. Enable Email Routing on `in.nathaninge.com`
+### 2. Enable Email Routing on `in.example.com`
 
 Cloudflare dashboard → Email → Email Routing → Settings → enable for
-`in.nathaninge.com`.
+`in.example.com`.
 
 ### 3. Generate the shared secrets
 
@@ -47,6 +47,7 @@ Put `TRIPIT_EMAIL_HMAC_KEY=...` into the backend's
 cd ops/email-worker
 npm install
 npx wrangler login                                  # if not already
+npx wrangler secret put TARGET_URL                  # https://<your-host>/api/intake/email
 npx wrangler secret put TRIPIT_EMAIL_HMAC_KEY       # paste the same hex
 npx wrangler secret put CF_ACCESS_CLIENT_ID         # from CF Access
 npx wrangler secret put CF_ACCESS_CLIENT_SECRET     # from CF Access
@@ -56,7 +57,7 @@ npx wrangler deploy
 ### 5. Route the address to the Worker
 
 Email Routing → Routing rules → Create rule.
-- Match: `trips@in.nathaninge.com`
+- Match: `trips@in.example.com`
 - Destination: **Send to a Worker** → `tripit-email-worker`
 
 ### 6. CF Access policy on `/api/intake/email`
@@ -65,7 +66,7 @@ In Zero Trust → Access → Applications, add a third app:
 
 | Field   | Value                                |
 |---------|--------------------------------------|
-| Domain  | `travel.nathaninge.com`              |
+| Domain  | `tripit.example.com`              |
 | Path    | `/api/intake/email`                  |
 
 One policy:
@@ -83,7 +84,7 @@ through; everything else continues to need owner SSO.
 ## How the forward works (end-user view)
 
 1. The owner adds an allow-listed email on the trip's Manage page.
-2. That sender writes a new mail to `trips@in.nathaninge.com` whose body
+2. That sender writes a new mail to `trips@in.example.com` whose body
    starts with the trip name on a line by itself, then forwards (or pastes)
    the confirmation underneath:
 
@@ -111,7 +112,7 @@ you can simulate the POST by hand:
 
 ```bash
 KEY=$(cat ~/.config/tripit/env | grep TRIPIT_EMAIL_HMAC_KEY | cut -d= -f2)
-BODY='{"from":"nate@gmail.com","subject":"Fwd: test","text":"Japan, autumn 2026\n\nForwarded confirmation goes here...","html":"","received_at":"2026-06-20T12:00:00Z"}'
+BODY='{"from":"you@example.com","subject":"Fwd: test","text":"Japan, autumn 2026\n\nForwarded confirmation goes here...","html":"","received_at":"2026-06-20T12:00:00Z"}'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | cut -d' ' -f2)
 curl -X POST http://127.0.0.1:5050/api/intake/email \
   -H "content-type: application/json" \

@@ -28,6 +28,11 @@ interface ForwardedJson {
 export default {
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
     // Read the full RFC822 payload. ReadableStream → Uint8Array.
+    if (!env.TARGET_URL) {
+      console.error('tripit: TARGET_URL secret is not set; dropping email');
+      return;
+    }
+
     const raw = await streamToUint8Array(message.raw);
 
     const parser = new PostalMime();

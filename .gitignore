@@ -22,3 +22,6 @@ frontend/tsconfig.tsbuildinfo
 .idea/
 .DS_Store
 *.swp
+
+# Claude Code local state
+.claude/

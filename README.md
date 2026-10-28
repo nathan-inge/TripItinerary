@@ -6,8 +6,8 @@ inbound/outbound), and lets you share trips with travel companions — either
 by their own email, so the trip shows up on their home page, or via an
 unguessable link for anyone who shouldn't need an account.
 
-Sibling to [ContextualTaskOrganizer](../ContextualTaskOrganizer) — same single-
-binary deploy shape, served at `travel.nathaninge.com` behind Cloudflare Access.
+Ships as a single Rust binary (SPA embedded) + one SQLite file. The reference
+deploy runs behind a Cloudflare Tunnel with Cloudflare Access in front.
 
 See [REQUIREMENTS.md](./REQUIREMENTS.md) and [TECH_SPEC.md](./TECH_SPEC.md) for
 the full design. Currently shipping **M1 (CRUD)**, **M2 (paste parsing)**, and
@@ -35,9 +35,9 @@ Open <http://localhost:3001>.
 
 ## Deploy
 
-`travel.nathaninge.com` behind Cloudflare Access on a CloudDesktop. See
+A Linux server behind a Cloudflare Tunnel + Cloudflare Access. See
 **[DEPLOY.md](./DEPLOY.md)** for the end-to-end walkthrough (one-time tunnel
-+ CF Access setup, then `make deploy` thereafter — defaults to remote `marvin`).
++ CF Access setup, then `make deploy REMOTE=<ssh-host>` thereafter).
 
 Configuration lives in `~/.config/tripit/env`; see [`.env.example`](./.env.example).
 
@@ -69,7 +69,7 @@ ops/       systemd unit, cloudflared example, deploy.sh, email-worker (M5)
 | `build-frontend` | Just the SPA build (rust-embed needs `frontend/dist/` to exist)    |
 | `test`           | `cargo test` + (frontend tests if any)                             |
 | `deploy`         | Runs `ops/deploy.sh`; override `REMOTE=...`                        |
-| `install-service`| Install + enable the systemd unit (run on the CloudDesktop)        |
+| `install-service`| Install + enable the systemd unit (run on the server)        |
 
 ## API
 
@@ -78,3 +78,7 @@ Cloudflare Access JWT (the trip's owner, or an address it's been shared with)
 or a share token in the URL (guests). Each trip response carries `my_role` —
 `owner`, `edit`, or `view` — which is what the UI gates on. The OpenAPI 3 spec
 is published at `/api/openapi.json`.
+
+## License
+
+[MIT](./LICENSE)

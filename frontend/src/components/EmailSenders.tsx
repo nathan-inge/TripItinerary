@@ -64,6 +64,10 @@ export default function EmailSenders({
 
   const copy = (text: string) => navigator.clipboard?.writeText(text);
 
+  // Email intake is optional; hide this when it isn't configured.
+  const address = INTAKE_ADDRESS;
+  if (!address) return null;
+
   return (
     <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div>
@@ -71,7 +75,7 @@ export default function EmailSenders({
         <p className="mt-1 text-xs text-slate-600">
           Anyone on the list below can forward a confirmation to{' '}
           <code className="rounded bg-slate-100 px-1 font-mono text-[11px]">
-            {INTAKE_ADDRESS}
+            {address}
           </code>{' '}
           with the trip name on the first line, and it'll land here.
         </p>
@@ -83,14 +87,14 @@ export default function EmailSenders({
             Address
           </span>
           <button
-            onClick={() => copy(INTAKE_ADDRESS)}
+            onClick={() => copy(address)}
             className="text-xs text-teal-700 hover:underline"
           >
             Copy
           </button>
         </div>
         <code className="block break-all rounded bg-white px-2 py-1 font-mono text-xs">
-          {INTAKE_ADDRESS}
+          {address}
         </code>
         <div className="flex items-center justify-between gap-2 pt-1">
           <span className="text-xs uppercase tracking-wide text-slate-500">

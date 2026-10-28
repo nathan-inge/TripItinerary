@@ -26,8 +26,8 @@ clean:
 	cd backend && cargo clean
 	rm -rf frontend/node_modules frontend/dist
 
-# Deploy: rsync source to CloudDesktop, build remotely, restart service.
-# Defaults to REMOTE=marvin; override with: make deploy REMOTE=other-host
+# Deploy: rsync source to a remote host, build there, restart service.
+# Usage: make deploy REMOTE=<ssh-host>
 deploy:
 	./ops/deploy.sh
 
